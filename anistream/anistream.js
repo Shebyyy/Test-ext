@@ -61,7 +61,7 @@ async function restGet(endpoint) {
 // ─── 1. Search Results ───
 async function searchResults(keyword) {
     try {
-        const query = `{ searchAnime(query: "${keyword.replace(/"/g, '\\"')}", limit: 40) { items { anilistId titleRomaji titleEnglish coverImage } } }`;
+        const query = `{ searchAnime(query: "${keyword.replace(/"/g, '\\"')}", limit: 24) { items { anilistId titleRomaji titleEnglish coverImage } } }`;
         const data = await graphqlQuery(query);
 
         const searchResult = data.searchAnime;
