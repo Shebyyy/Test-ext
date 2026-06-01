@@ -127,7 +127,6 @@ async function extractEpisodes(url) {
     try {
         const anilistId = url.trim();
 
-        // Step 1: Get internal catalog ID from AniList ID via GraphQL
         const query = `{ anime(anilistId: ${anilistId}) { id anilistId } }`;
         const data = await graphqlQuery(query);
 
@@ -137,7 +136,6 @@ async function extractEpisodes(url) {
 
         const catalogId = data.anime.id;
 
-        // Step 2: Get episode list from REST API
         const episodes = await restGet(`/episodes?id=${encodeURIComponent(catalogId)}`);
 
         if (!episodes || !Array.isArray(episodes)) {
@@ -158,8 +156,7 @@ async function extractEpisodes(url) {
             return JSON.stringify([{ href: "Error", number: "Error" }]);
         }
 
-        // Return newest first
-        results.reverse();
+        // Return in chronological order (ep 1, 2, 3...)
         return JSON.stringify(results);
     } catch (err) {
         return JSON.stringify([{ href: "Error", number: "Error" }]);
@@ -177,7 +174,6 @@ async function extractStreamUrl(url) {
         const catalogId = parts[0];
         const epNum = parts[1];
 
-        // Step 1: Get available servers
         const servers = await restGet(`/servers?id=${encodeURIComponent(catalogId)}&epNum=${epNum}`);
 
         if (!servers) {
@@ -186,75 +182,69 @@ async function extractStreamUrl(url) {
 
         const streams = [];
         let subtitleUrl = null;
-
-        // Priority order for providers: best quality & features first
         const subProviders = servers.subProviders || [];
         const dubProviders = servers.dubProviders || [];
 
-        // Preferred providers for soft subs (yuki, vee) then hard subs (uwu, kiwi, mochi, mimi)
-        const preferredSub = ["yuki", "vee", "uwu", "kiwi", "mochi", "mimi", "beep"];
-        const preferredDub = ["yuki", "uwu", "kiwi", "mochi", "mimi"];
-
-        // Function to fetch and add streams for a provider
-        async function addProviderStreams(providerId, type, label) {
+        // Fetch ALL sub providers — no filtering, no limiting
+        for (const provider of subProviders) {
             try {
                 const sources = await restGet(
-                    `/sources?id=${encodeURIComponent(catalogId)}&epNum=${epNum}&type=${type}&providerId=${providerId}`
+                    `/sources?id=${encodeURIComponent(catalogId)}&epNum=${epNum}&type=sub&providerId=${provider.id}`
                 );
 
-                if (!sources || !sources.sources || sources.sources.length === 0) return;
+                if (!sources || !sources.sources || sources.sources.length === 0) continue;
 
-                const referer = sources.headers && sources.headers.Referer ? sources.headers.Referer : "";
+                const referer = (sources.headers && sources.headers.Referer) ? sources.headers.Referer : "";
+                const streamHeaders = referer ? { "Referer": referer } : {};
 
                 for (const src of sources.sources) {
-                    const quality = src.quality || "auto";
-                    const streamHeaders = referer ? { "Referer": referer } : {};
-
+                    const quality = src.quality || "default";
                     streams.push({
-                        title: `${label} - ${quality}`,
+                        title: "SUB - " + capitalize(provider.id) + " - " + quality,
                         streamUrl: src.url,
                         headers: streamHeaders
                     });
                 }
 
-                // Grab subtitle tracks from soft sub providers
-                if (type === "sub" && sources.tracks && Array.isArray(sources.tracks) && sources.tracks.length > 0 && !subtitleUrl) {
-                    const defaultTrack = sources.tracks.find(t => t.default) || sources.tracks[0];
-                    subtitleUrl = defaultTrack.url || null;
+                // Grab subtitles from any provider that has them
+                if (sources.tracks && Array.isArray(sources.tracks) && sources.tracks.length > 0 && !subtitleUrl) {
+                    const defaultTrack = sources.tracks.find(function(t) { return t.default; });
+                    subtitleUrl = (defaultTrack || sources.tracks[0]).url || null;
                 }
             } catch (e) {
-                // Silently skip failed providers
+                // Skip failed providers silently
             }
         }
 
-        // Fetch streams for top sub providers (limit to 3 to keep it fast)
-        const subToFetch = subProviders
-            .filter(p => preferredSub.includes(p.id))
-            .sort((a, b) => preferredSub.indexOf(a.id) - preferredSub.indexOf(b.id))
-            .slice(0, 3);
+        // Fetch ALL dub providers — no filtering, no limiting
+        for (const provider of dubProviders) {
+            try {
+                const sources = await restGet(
+                    `/sources?id=${encodeURIComponent(catalogId)}&epNum=${epNum}&type=dub&providerId=${provider.id}`
+                );
 
-        // Fetch streams for top dub providers (limit to 2)
-        const dubToFetch = dubProviders
-            .filter(p => preferredDub.includes(p.id))
-            .sort((a, b) => preferredDub.indexOf(a.id) - preferredDub.indexOf(b.id))
-            .slice(0, 2);
+                if (!sources || !sources.sources || sources.sources.length === 0) continue;
 
-        // If no preferred providers matched, use defaults
-        if (subToFetch.length === 0 && subProviders.length > 0) {
-            subToFetch.push(subProviders[0]);
-        }
-        if (dubToFetch.length === 0 && dubProviders.length > 0) {
-            dubToFetch.push(dubProviders[0]);
-        }
+                const referer = (sources.headers && sources.headers.Referer) ? sources.headers.Referer : "";
+                const streamHeaders = referer ? { "Referer": referer } : {};
 
-        // Fetch SUB streams
-        for (const provider of subToFetch) {
-            await addProviderStreams(provider.id, "sub", `SUB - ${capitalize(provider.id)}`);
-        }
+                for (const src of sources.sources) {
+                    const quality = src.quality || "default";
+                    streams.push({
+                        title: "DUB - " + capitalize(provider.id) + " - " + quality,
+                        streamUrl: src.url,
+                        headers: streamHeaders
+                    });
+                }
 
-        // Fetch DUB streams
-        for (const provider of dubToFetch) {
-            await addProviderStreams(provider.id, "dub", `DUB - ${capitalize(provider.id)}`);
+                // Also grab subtitles from dub providers if not found yet
+                if (sources.tracks && Array.isArray(sources.tracks) && sources.tracks.length > 0 && !subtitleUrl) {
+                    const defaultTrack = sources.tracks.find(function(t) { return t.default; });
+                    subtitleUrl = (defaultTrack || sources.tracks[0]).url || null;
+                }
+            } catch (e) {
+                // Skip failed providers silently
+            }
         }
 
         if (streams.length === 0) {
@@ -270,7 +260,7 @@ async function extractStreamUrl(url) {
     }
 }
 
-// ─── Utility: Capitalize string ───
+// ─── Utility ───
 function capitalize(str) {
     if (!str) return str;
     return str.charAt(0).toUpperCase() + str.slice(1);
