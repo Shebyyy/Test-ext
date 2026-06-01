@@ -1,0 +1,27 @@
+{
+    "sourceName": "AniStream",
+    "iconUrl": "https://anistream.one/favicon.svg",
+    "author": {
+        "name": "Sheby"
+    },
+    "version": "1.0.0",
+    "language": "Multi-Language",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://anistream.one/",
+    "searchBaseUrl": "https://graphql.animex.one/graphql",
+    "scriptUrl": "https://raw.githubusercontent.com/Shebyyy/Test-ext/main/anistream/anistream.js",
+    "type": "anime",
+    "asyncJS": true,
+    "softsub": true,
+    "downloadSupport": true,
+    "note": "Uses AniStream API with multiple servers (Sub/Dub), quality options (up to 1080p), and soft subtitles. Powered by animex.",
+    "supportsSora": true,
+    "supportsLuna": true,
+    "supportsDartotsu": true,
+    "supportsMojuru": true,
+    "supportsAnymex": true,
+    "supportsTsumi": true,
+    "supportsHiyoku": true,
+    "supportsShirox": true
+}
