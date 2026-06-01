@@ -1,7 +1,3 @@
-// AniStream Sora Module
-// Author: Sheby
-// Powered by animex API (graphql.animex.one + pp.animex.one)
-
 const GRAPHQL_URL = "https://graphql.animex.one/graphql";
 const REST_URL = "https://pp.animex.one/rest/api";
 const HEADERS = {
