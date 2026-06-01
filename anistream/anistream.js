@@ -161,6 +161,9 @@ async function extractEpisodes(url) {
             return JSON.stringify([{ href: "Error", number: "Error" }]);
         }
 
+        // Reverse so newest episode appears first (like other Sora modules)
+        results.reverse();
+
         return JSON.stringify(results);
     } catch (err) {
         return JSON.stringify([{ href: "Error", number: "Error" }]);
