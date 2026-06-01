@@ -58,6 +58,13 @@ async function restGet(endpoint) {
     }
 }
 
+// ─── Helper: Ensure Referer ends with / ───
+function fixReferer(referer) {
+    if (!referer) return "";
+    if (referer.endsWith("/") || referer.endsWith('"')) return referer;
+    return referer + "/";
+}
+
 // ─── 1. Search Results ───
 async function searchResults(keyword) {
     try {
@@ -144,11 +151,9 @@ async function extractEpisodes(url) {
 
         const results = [];
         for (const ep of episodes) {
-            const epTitle = (ep.titles && ep.titles.en) ? ` - ${ep.titles.en}` : "";
             results.push({
                 number: ep.number || 0,
-                href: `${catalogId}|${ep.number}`,
-                title: epTitle
+                href: `${catalogId}|${ep.number}`
             });
         }
 
@@ -156,7 +161,9 @@ async function extractEpisodes(url) {
             return JSON.stringify([{ href: "Error", number: "Error" }]);
         }
 
-        // Return in chronological order (ep 1, 2, 3...)
+        // Reverse so newest episode appears first (like other Sora modules)
+        results.reverse();
+
         return JSON.stringify(results);
     } catch (err) {
         return JSON.stringify([{ href: "Error", number: "Error" }]);
@@ -176,29 +183,36 @@ async function extractStreamUrl(url) {
 
         const servers = await restGet(`/servers?id=${encodeURIComponent(catalogId)}&epNum=${epNum}`);
 
-        if (!servers) {
+        if (!servers || !servers.subProviders) {
             return JSON.stringify({ streams: [], subtitle: "" });
         }
 
         const streams = [];
-        let subtitleUrl = null;
+        let subtitleUrl = "";
+        let subtitleHeaders = {};
         const subProviders = servers.subProviders || [];
         const dubProviders = servers.dubProviders || [];
 
-        // Fetch ALL sub providers — no filtering, no limiting
+        // Process providers and collect all sources + subtitles
         for (const provider of subProviders) {
             try {
                 const sources = await restGet(
                     `/sources?id=${encodeURIComponent(catalogId)}&epNum=${epNum}&type=sub&providerId=${provider.id}`
                 );
 
-                if (!sources || !sources.sources || sources.sources.length === 0) continue;
+                // Skip if API returned an error
+                if (!sources || sources.error || !sources.sources || !Array.isArray(sources.sources) || sources.sources.length === 0) continue;
 
-                const referer = (sources.headers && sources.headers.Referer) ? sources.headers.Referer : "";
+                // Fix Referer: ensure trailing slash
+                const rawReferer = (sources.headers && sources.headers.Referer) ? sources.headers.Referer : "";
+                const referer = fixReferer(rawReferer);
                 const streamHeaders = referer ? { "Referer": referer } : {};
 
+                // Also copy any other useful headers (Origin, User-Agent)
+                if (sources.headers && sources.headers.Origin) streamHeaders["Origin"] = sources.headers.Origin;
+
                 for (const src of sources.sources) {
-                    const quality = src.quality || "default";
+                    var quality = src.quality || "default";
                     streams.push({
                         title: "SUB - " + capitalize(provider.id) + " - " + quality,
                         streamUrl: src.url,
@@ -206,30 +220,49 @@ async function extractStreamUrl(url) {
                     });
                 }
 
-                // Grab subtitles from any provider that has them
-                if (sources.tracks && Array.isArray(sources.tracks) && sources.tracks.length > 0 && !subtitleUrl) {
-                    const defaultTrack = sources.tracks.find(function(t) { return t.default; });
-                    subtitleUrl = (defaultTrack || sources.tracks[0]).url || null;
+                // Extract subtitles: only kind=captions, prefer English default
+                if (sources.tracks && Array.isArray(sources.tracks)) {
+                    var captionTracks = sources.tracks.filter(function(t) {
+                        return t.kind === "captions" && t.url;
+                    });
+                    if (captionTracks.length > 0) {
+                        // Prefer English default track
+                        var engDefault = captionTracks.find(function(t) {
+                            return t.default && (t.lang || t.label || "").toLowerCase().indexOf("english") !== -1;
+                        });
+                        var anyDefault = captionTracks.find(function(t) { return t.default; });
+                        var engTrack = captionTracks.find(function(t) {
+                            return (t.lang || t.label || "").toLowerCase().indexOf("english") !== -1;
+                        });
+                        var bestTrack = engDefault || anyDefault || engTrack || captionTracks[0];
+                        if (bestTrack && bestTrack.url) {
+                            subtitleUrl = bestTrack.url;
+                            subtitleHeaders = streamHeaders;
+                        }
+                    }
                 }
             } catch (e) {
                 // Skip failed providers silently
             }
         }
 
-        // Fetch ALL dub providers — no filtering, no limiting
+        // Process dub providers
         for (const provider of dubProviders) {
             try {
                 const sources = await restGet(
                     `/sources?id=${encodeURIComponent(catalogId)}&epNum=${epNum}&type=dub&providerId=${provider.id}`
                 );
 
-                if (!sources || !sources.sources || sources.sources.length === 0) continue;
+                if (!sources || sources.error || !sources.sources || !Array.isArray(sources.sources) || sources.sources.length === 0) continue;
 
-                const referer = (sources.headers && sources.headers.Referer) ? sources.headers.Referer : "";
+                const rawReferer = (sources.headers && sources.headers.Referer) ? sources.headers.Referer : "";
+                const referer = fixReferer(rawReferer);
                 const streamHeaders = referer ? { "Referer": referer } : {};
 
+                if (sources.headers && sources.headers.Origin) streamHeaders["Origin"] = sources.headers.Origin;
+
                 for (const src of sources.sources) {
-                    const quality = src.quality || "default";
+                    var quality = src.quality || "default";
                     streams.push({
                         title: "DUB - " + capitalize(provider.id) + " - " + quality,
                         streamUrl: src.url,
@@ -237,10 +270,19 @@ async function extractStreamUrl(url) {
                     });
                 }
 
-                // Also grab subtitles from dub providers if not found yet
-                if (sources.tracks && Array.isArray(sources.tracks) && sources.tracks.length > 0 && !subtitleUrl) {
-                    const defaultTrack = sources.tracks.find(function(t) { return t.default; });
-                    subtitleUrl = (defaultTrack || sources.tracks[0]).url || null;
+                // Also grab subtitles from dub providers
+                if (!subtitleUrl && sources.tracks && Array.isArray(sources.tracks)) {
+                    var captionTracks = sources.tracks.filter(function(t) {
+                        return t.kind === "captions" && t.url;
+                    });
+                    if (captionTracks.length > 0) {
+                        var anyDefault = captionTracks.find(function(t) { return t.default; });
+                        var bestTrack = anyDefault || captionTracks[0];
+                        if (bestTrack && bestTrack.url) {
+                            subtitleUrl = bestTrack.url;
+                            subtitleHeaders = streamHeaders;
+                        }
+                    }
                 }
             } catch (e) {
                 // Skip failed providers silently
