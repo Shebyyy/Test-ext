@@ -1,0 +1,24 @@
+{
+  "sourceName": "HStream",
+  "iconUrl": "https://hstream.moe/favicon.ico",
+  "author": {
+    "name": "Sheby",
+    "icon": ""
+  },
+  "version": "1.0.0",
+  "language": "English",
+  "streamType": "HLS",
+  "quality": "4K",
+  "baseUrl": "https://hstream.moe/",
+  "searchBaseUrl": "https://hstream.moe/search?q=%s",
+  "scriptUrl": "https://raw.githubusercontent.com/Shebyyy/Test-ext/main/hstreammoe/hstreammoe.js",
+  "type": "anime",
+  "asyncJS": true,
+  "softsub": true,
+  "downloadSupport": true,
+  "supportsSora": true,
+  "supportsLuna": true,
+  "supportsTsumi": true,
+  "supportsHiyoku": true
+}
+
