@@ -1,0 +1,24 @@
+{
+  "sourceName": "Hentai.SH",
+  "iconUrl": "https://hentai.sh/favicon.ico",
+  "author": {
+    "name": "Sheby",
+    "icon": ""
+  },
+  "version": "1.0.0",
+  "language": "English",
+  "streamType": "HLS",
+  "quality": "1080p",
+  "baseUrl": "https://hentai.sh/",
+  "searchBaseUrl": "https://hentai.sh/api/search?q=%s&limit=20",
+  "scriptUrl": "https://raw.githubusercontent.com/Shebyyy/Test-ext/main/hentaish/hentaish.js",
+  "type": "anime",
+  "asyncJS": true,
+  "softsub": false,
+  "downloadSupport": true,
+  "supportsSora": true,
+  "supportsLuna": true,
+  "supportsTsumi": true,
+  "supportsHiyoku": true
+}
+
