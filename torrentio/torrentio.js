@@ -45,7 +45,7 @@ const ANIME_TRACKERS = [
 ];
 
 // ─── SEARCH ────────────────────────────────────────────────────────────────────
-// Uses AniList GraphQL API (same as Aniyomi)
+// Uses AniList GraphQL API
 
 const SEARCH_QUERY = `
 query($page: Int, $perPage: Int, $sort: [MediaSort], $search: String) {
@@ -114,7 +114,7 @@ async function searchResults(keyword) {
 }
 
 // ─── DETAILS ───────────────────────────────────────────────────────────────────
-// Uses AniList GraphQL detail query (same as Aniyomi)
+// Uses AniList GraphQL detail query
 
 const DETAILS_QUERY = `
 query media($id: Int) {
@@ -191,7 +191,7 @@ async function extractDetails(url) {
 }
 
 // ─── EPISODES ──────────────────────────────────────────────────────────────────
-// Uses api.ani.zip/mappings?anilist_id={id} (same as Aniyomi)
+// Uses api.ani.zip/mappings?anilist_id={id}
 // Gets kitsuId + episode list, then builds torrentio stream URLs
 
 async function extractEpisodes(url) {
@@ -218,9 +218,10 @@ async function extractEpisodes(url) {
         const episodes = json.episodes || {};
 
         if (mediaType === "MOVIE") {
-            // Movie: single stream URL
+            // Movie: single stream URL (full URL like other Sora modules)
+            const movieStreamUrl = `${BASE_URL}/providers=nyaasi,tokyotosho,anidex,horriblesubs|language=japanese|qualityfilter=720p,480p,other,scr,cam,unknown|sort=quality/stream/movie/kitsu:${kitsuId}.json`;
             return JSON.stringify([{
-                href: `/stream/movie/kitsu:${kitsuId}.json`,
+                href: movieStreamUrl,
                 number: 1,
                 name: "Movie"
             }]);
@@ -238,8 +239,11 @@ async function extractEpisodes(url) {
             const epName = title ? `Episode ${ep.episode}: ${title}` : `Episode ${ep.episode}`;
             const epNumInt = Math.round(episodeNum);
 
+            // Use FULL URL (like other Sora modules) so Sora passes it correctly
+            const fullStreamUrl = `${BASE_URL}/providers=nyaasi,tokyotosho,anidex,horriblesubs|language=japanese|qualityfilter=720p,480p,other,scr,cam,unknown|sort=quality/stream/series/kitsu:${kitsuId}:${epNumInt}.json`;
+
             episodeList.push({
-                href: `/stream/series/kitsu:${kitsuId}:${epNumInt}.json`,
+                href: fullStreamUrl,
                 number: episodeNum,
                 name: epName,
                 date: ep.airDate || ""
@@ -258,17 +262,21 @@ async function extractEpisodes(url) {
 }
 
 // ─── STREAM URL ────────────────────────────────────────────────────────────────
-// Fetches from torrentio.strem.fun/stream/... (same as Aniyomi)
+// Fetches from torrentio.strem.fun/stream/...
 // Returns list of magnet links with infoHash + fileIdx
 
 async function extractStreamUrl(url) {
     try {
         let streamUrl;
 
-        if (url.startsWith("/stream/")) {
-            // Build full torrentio URL with providers and quality params
+        if (url.startsWith("http") && url.includes("/stream/")) {
+            // Full URL from extractEpisodes (already has providers config)
+            streamUrl = url;
+        } else if (url.startsWith("/stream/")) {
+            // Legacy relative path - build full torrentio URL with providers
             streamUrl = `${BASE_URL}/providers=nyaasi,tokyotosho,anidex,horriblesubs|language=japanese|qualityfilter=720p,480p,other,scr,cam,unknown|sort=quality${url}`;
         } else if (url.startsWith("http")) {
+            // Some other full URL
             streamUrl = url;
         } else {
             return JSON.stringify({ streams: [], subtitle: "" });
@@ -278,7 +286,7 @@ async function extractStreamUrl(url) {
         const json = await response.json();
         const streams = json.streams || [];
 
-        // Build tracker string for magnet links (same as Aniyomi)
+        // Build tracker string for magnet links
         const trackerList = ANIME_TRACKERS.map(t => t.trim()).filter(t => t).join("&tr=");
 
         const streamResults = streams.map(stream => {
@@ -287,7 +295,7 @@ async function extractStreamUrl(url) {
             const name = (stream.name || "").replace("Torrentio\n", "");
             const title = stream.title || "";
 
-            // Build magnet link (same as Aniyomi)
+            // Build magnet link
             const magnetUrl = `magnet:?xt=urn:btih:${infoHash}&dn=${infoHash}&tr=${trackerList}&index=${fileIdx}`;
 
             return {
