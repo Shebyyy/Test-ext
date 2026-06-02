@@ -1,0 +1,27 @@
+{
+    "sourceName": "Torrentio Anime",
+    "iconUrl": "https://torrentio.strem.fun/logo.png",
+    "author": {
+        "name": "Sheby",
+        "icon": "https://avatars.githubusercontent.com/u/83452219?v=4"
+    },
+    "version": "1.0.0",
+    "language": "Multi-Language",
+    "streamType": "TORRENT",
+    "quality": "1080p",
+    "baseUrl": "https://torrentio.strem.fun/",
+    "searchBaseUrl": "https://graphql.anilist.co",
+    "scriptUrl": "https://raw.githubusercontent.com/Shebyyy/Test-ext/main/torrentio/torrentio.js",
+    "type": "anime",
+    "asyncJS": true,
+    "softsub": false,
+    "downloadSupport": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "supportsDartotsu": true,
+    "supportsMojuru": true,
+    "supportsAnymex": true,
+    "supportsTsumi": true,
+    "supportsHiyoku": true,
+    "supportsShirox": true
+}
