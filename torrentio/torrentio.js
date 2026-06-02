@@ -2,7 +2,7 @@
  * Torrentio Anime - Sora Module
  * Source: https://torrentio.strem.fun
  * 
- * Matches Aniyomi TorrentioAnime extension behavior:
+ * Matches TorrentioAnime extension behavior:
  * - Search via AniList GraphQL API
  * - Details from AniList GraphQL (id-based query)
  * - Episodes from api.ani.zip/mappings (kitsu ID mapping)
@@ -14,7 +14,7 @@ const BASE_URL = "https://torrentio.strem.fun";
 const ANILIST_API = "https://graphql.anilist.co";
 const ANIZIP_API = "https://api.ani.zip/mappings";
 
-// Anime trackers (same as Aniyomi extension)
+// Anime trackers
 const ANIME_TRACKERS = [
     "http://nyaa.tracker.wf:7777/announce",
     "http://anidex.moe:6969/announce",
@@ -218,10 +218,9 @@ async function extractEpisodes(url) {
         const episodes = json.episodes || {};
 
         if (mediaType === "MOVIE") {
-            // Movie: single stream URL (full URL like other Sora modules)
-            const movieStreamUrl = `${BASE_URL}/providers=nyaasi,tokyotosho,anidex,horriblesubs|language=japanese|qualityfilter=720p,480p,other,scr,cam,unknown|sort=quality/stream/movie/kitsu:${kitsuId}.json`;
+            // Movie: single stream URL
             return JSON.stringify([{
-                href: movieStreamUrl,
+                href: `/stream/movie/kitsu:${kitsuId}.json`,
                 number: 1,
                 name: "Movie"
             }]);
@@ -239,11 +238,8 @@ async function extractEpisodes(url) {
             const epName = title ? `Episode ${ep.episode}: ${title}` : `Episode ${ep.episode}`;
             const epNumInt = Math.round(episodeNum);
 
-            // Use FULL URL (like other Sora modules) so Sora passes it correctly
-            const fullStreamUrl = `${BASE_URL}/providers=nyaasi,tokyotosho,anidex,horriblesubs|language=japanese|qualityfilter=720p,480p,other,scr,cam,unknown|sort=quality/stream/series/kitsu:${kitsuId}:${epNumInt}.json`;
-
             episodeList.push({
-                href: fullStreamUrl,
+                href: `/stream/series/kitsu:${kitsuId}:${epNumInt}.json`,
                 number: episodeNum,
                 name: epName,
                 date: ep.airDate || ""
@@ -269,14 +265,10 @@ async function extractStreamUrl(url) {
     try {
         let streamUrl;
 
-        if (url.startsWith("http") && url.includes("/stream/")) {
-            // Full URL from extractEpisodes (already has providers config)
-            streamUrl = url;
-        } else if (url.startsWith("/stream/")) {
-            // Legacy relative path - build full torrentio URL with providers
+        if (url.startsWith("/stream/")) {
+            // Build full torrentio URL with providers and quality params
             streamUrl = `${BASE_URL}/providers=nyaasi,tokyotosho,anidex,horriblesubs|language=japanese|qualityfilter=720p,480p,other,scr,cam,unknown|sort=quality${url}`;
         } else if (url.startsWith("http")) {
-            // Some other full URL
             streamUrl = url;
         } else {
             return JSON.stringify({ streams: [], subtitle: "" });
@@ -305,7 +297,7 @@ async function extractStreamUrl(url) {
             };
         });
 
-        // Sort: prefer 1080p, then seeders (same logic as Aniyomi's sort)
+        // Sort: prefer 1080p, then seeders
         streamResults.sort((a, b) => {
             const a1080 = a.title.includes("1080p") ? 0 : 1;
             const b1080 = b.title.includes("1080p") ? 0 : 1;
