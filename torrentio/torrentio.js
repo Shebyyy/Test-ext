@@ -246,9 +246,6 @@ async function extractEpisodes(url) {
             });
         }
 
-        // Reverse so ep1 is at top (same as Aniyomi: .reversed())
-        episodeList.reverse();
-
         if (episodeList.length === 0) {
             return JSON.stringify([{ href: url, number: 1 }]);
         }
