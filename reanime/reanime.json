@@ -1,0 +1,27 @@
+{
+    "sourceName": "Re:ANIME",
+    "iconUrl": "https://reanime.to/apple-touch-icon.png",
+    "author": {
+        "name": "Sheby",
+        "icon": "https://avatars.githubusercontent.com/u/83452219?v=4"
+    },
+    "version": "1.0.0",
+    "language": "English (DUB/SUB)",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://reanime.to/",
+    "searchBaseUrl": "https://reanime.to/search?q=%s",
+    "scriptUrl": "https://raw.githubusercontent.com/Shebyyy/Test-ext/main/reanime/reanime.js",
+    "type": "anime",
+    "asyncJS": true,
+    "softsub": true,
+    "downloadSupport": false,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "supportsDartotsu": true,
+    "supportsMojuru": true,
+    "supportsAnymex": true,
+    "supportsTsumi": true,
+    "supportsHiyoku": true,
+    "supportsShirox": true
+}
