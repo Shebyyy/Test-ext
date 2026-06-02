@@ -1,0 +1,27 @@
+{
+    "sourceName": "Nyaa",
+    "iconUrl": "https://nyaa.si/static/favicon.png",
+    "author": {
+        "name": "Sheby",
+        "icon": "https://avatars.githubusercontent.com/u/83452219?v=4"
+    },
+    "version": "1.0.0",
+    "language": "Multi-Language",
+    "streamType": "TORRENT",
+    "quality": "1080p",
+    "baseUrl": "https://nyaa.si/",
+    "searchBaseUrl": "https://nyaa.si/?page=rss&c=1_2&q=%s",
+    "scriptUrl": "https://raw.githubusercontent.com/Shebyyy/Test-ext/main/nyaa/nyaa.js",
+    "type": "anime",
+    "asyncJS": true,
+    "softsub": false,
+    "downloadSupport": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "supportsDartotsu": true,
+    "supportsMojuru": true,
+    "supportsAnymex": true,
+    "supportsTsumi": true,
+    "supportsHiyoku": true,
+    "supportsShirox": true
+}
