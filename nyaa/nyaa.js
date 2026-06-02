@@ -2,84 +2,102 @@
  * Nyaa - Sora Module
  * Source: https://nyaa.si
  * 
- * Supported features:
- * - Search anime torrents via RSS feed
- * - Torrent file parsing (bencode decoder) to list video files as episodes
- * - Magnet link extraction with file index for multi-file torrents
- * - Multiple category filters (Sub/Dub/Raw)
- * - Sort by seeders, downloads, date
- * 
- * Uses Nyaa RSS API + bencode torrent parser
+ * Matches Aniyomi NyaaTorrent extension behavior:
+ * - Search via HTML table scraping (same as Aniyomi)
+ * - Details from view page (category, seeders, leechers, size, submitter)
+ * - Episodes from .torrent file parsing (bencode decoder)
+ * - Each video file = one episode with magnet &index= param
+ * - Stream = magnet link directly
  */
 
 const BASE_URL = "https://nyaa.si";
-const RSS_BASE = "https://nyaa.si/?page=rss";
 
-// Category mappings
-const CATEGORIES = {
-    all: "1_0",
-    englishTranslated: "1_2",
-    nonEnglishTranslated: "1_3",
-    raw: "1_4"
-};
-
-// Valid video file extensions
+// Valid video extensions (same as Aniyomi)
 const VALID_EXTENSIONS = new Set([
     "mp4", "mkv", "avi", "webm", "flv", "mov", "ts", "ogg",
     "mpeg", "mpg", "wmv", "vob", "mts"
 ]);
 
-// Default trackers for magnet links
-const TRACKERS = [
-    "http://nyaa.tracker.wf:7777/announce",
-    "udp://open.stealth.si:80/announce",
-    "udp://tracker.opentrackr.org:1337/announce",
-    "udp://exodus.desync.com:6969/announce",
-    "udp://tracker.torrent.eu.org:451/announce"
-];
-
 // ─── SEARCH ────────────────────────────────────────────────────────────────────
+// Aniyomi scrapes HTML table: table.torrent-list tbody tr
+// Each row: td:nth-child(1) = category icon, td:nth-child(2) = title link,
+//           td:nth-child(3) = comments, td:nth-child(4) = links (dl + magnet),
+//           td:nth-child(5) = size, td:nth-child(6) = date,
+//           td:nth-child(7) = seeders, td:nth-child(8) = leechers,
+//           td:nth-child(9) = downloads
 
 async function searchResults(keyword) {
     const results = [];
     try {
         const encodedKeyword = encodeURIComponent(keyword);
-        const url = `${RSS_BASE}&c=${CATEGORIES.englishTranslated}&q=${encodedKeyword}&limit=30`;
+        // Same URL format as Aniyomi: ?f=0&c=1_2&s=seeders&o=desc&q=...
+        const url = `${BASE_URL}/?f=0&c=1_2&s=seeders&o=desc&q=${encodedKeyword}&p=1`;
         const response = await soraFetch(url);
-        const xml = await response.text();
+        const html = await response.text();
 
-        const itemRegex = /<item>[\s\S]*?<\/item>/g;
-        let itemMatch;
+        // Parse table rows - match all <tr> inside tbody
+        const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/g;
+        let rowMatch;
 
-        while ((itemMatch = itemRegex.exec(xml)) !== null) {
-            const item = itemMatch[0];
+        while ((rowMatch = rowRegex.exec(html)) !== null) {
+            const row = rowMatch[0];
 
-            const title = extractXmlTag(item, "title");
-            const link = extractXmlTag(item, "link");
-            const infoHash = extractXmlCustom(item, "nyaa:infoHash");
-            const seeders = extractXmlCustom(item, "nyaa:seeders");
-            const leechers = extractXmlCustom(item, "nyaa:leechers");
-            const size = extractXmlCustom(item, "nyaa:size");
-            const downloads = extractXmlCustom(item, "nyaa:downloads");
-            const category = extractXmlCustom(item, "nyaa:category");
-            const trusted = extractXmlCustom(item, "nyaa:trusted");
-            const remake = extractXmlCustom(item, "nyaa:remake");
-            const torrentId = extractTorrentId(link);
+            // Skip header row
+            if (row.includes("hdr-category")) continue;
 
-            if (title) {
+            // Extract title and href from td:nth-child(2) a
+            // Aniyomi: element.select("td:nth-child(2) a:not(.comments)").attr("title")
+            const titleMatch = row.match(/<td[^>]*colspan="2"[^>]*>[\s\S]*?<a[^>]+href="\/view\/(\d+)"[^>]+title="([^"]*)"/);
+            if (!titleMatch) {
+                // Try without colspan
+                const altTitle = row.match(/<td[^>]*>[\s\S]*?<a[^>]+href="\/view\/(\d+)"[^>]+title="([^"]*)"/);
+                if (!altTitle) continue;
+                var torrentId = altTitle[1];
+                var title = altTitle[2];
+            } else {
+                var torrentId = titleMatch[1];
+                var title = titleMatch[2];
+            }
+
+            // Extract magnet link from the links column
+            const magnetMatch = row.match(/href="(magnet:\?xt=urn:btih:[^"]+)"/);
+            const infoHash = magnetMatch ? magnetMatch[1].match(/urn:btih:([a-fA-F0-9]{40})/)?.[1] || "" : "";
+
+            // Extract size
+            const sizeMatch = row.match(/<td class="text-center">([\d.]+\s*(?:TiB|GiB|MiB|KiB))<\/td>/);
+
+            // Extract seeders, leechers, downloads
+            const tds = row.match(/<td class="text-center">[\s\S]*?<\/td>/g) || [];
+            let seeders = "0", leechers = "0", downloads = "0";
+            
+            // Last 3 tds are seeders, leechers, downloads
+            if (tds.length >= 3) {
+                seeders = tds[tds.length - 3].replace(/<[^>]+>/g, "").trim();
+                leechers = tds[tds.length - 2].replace(/<[^>]+>/g, "").trim();
+                downloads = tds[tds.length - 1].replace(/<[^>]+>/g, "").trim();
+            }
+
+            // Extract date
+            const dateMatch = row.match(/data-timestamp="(\d+)"/);
+            const date = dateMatch ? new Date(parseInt(dateMatch[1]) * 1000).toISOString() : "";
+
+            // Check trusted/remake from row class
+            const isTrusted = row.includes('class="success"') || row.includes('class="danger"');
+            const isRemake = row.includes('class="danger"');
+
+            if (title && torrentId) {
                 results.push({
                     title: cleanText(title),
                     image: "",
                     href: `${BASE_URL}/view/${torrentId}`,
-                    infoHash: infoHash || "",
-                    seeders: seeders || "0",
-                    leechers: leechers || "0",
-                    size: size || "N/A",
-                    downloads: downloads || "0",
-                    category: category || "",
-                    trusted: trusted === "Yes",
-                    remake: remake === "Yes",
-                    torrentUrl: link || ""
+                    seeders: seeders,
+                    leechers: leechers,
+                    size: sizeMatch ? sizeMatch[1] : "N/A",
+                    downloads: downloads,
+                    date: date,
+                    infoHash: infoHash,
+                    trusted: isTrusted,
+                    remake: isRemake
                 });
             }
         }
@@ -92,56 +110,58 @@ async function searchResults(keyword) {
 }
 
 // ─── DETAILS ───────────────────────────────────────────────────────────────────
+// Aniyomi extracts: category, seeders, leechers, filesize, description, submitter, thumbnail
 
 async function extractDetails(url) {
     try {
         const response = await soraFetch(url);
         const html = await response.text();
 
-        let seeders = "0";
-        let leechers = "0";
-        let size = "N/A";
-        let date = "N/A";
-        let infoHash = "";
-        let category = "";
-        let submitter = "";
-        let trusted = false;
+        // Extract key-value pairs from panel-body (same selectors as Aniyomi)
+        // div.panel-body contains rows of: <div class="col-md-1">Label:</div><div class="col-md-5">Value</div>
+        const fieldRegex = /<div class="col-md-1">([^<]+):<\/div>\s*<div class="col-md-[57]">([\s\S]*?)<\/div>/g;
+        const fields = {};
+        let fieldMatch;
+        while ((fieldMatch = fieldRegex.exec(html)) !== null) {
+            const label = fieldMatch[1].trim();
+            const value = fieldMatch[2].replace(/<[^>]+>/g, "").trim();
+            fields[label] = value;
+        }
 
-        // Extract info hash from magnet link
+        const category = fields["Category"] || "N/A";
+        const seeders = fields["Seeders"] || "0";
+        const leechers = fields["Leechers"] || "0";
+        const filesize = fields["File size"] || "N/A";
+        const submitter = fields["Submitter"] || "N/A";
+        const date = fields["Date"] || "N/A";
+
+        // Extract description from #torrent-description (same as Aniyomi)
+        let description = "";
+        const descMatch = html.match(/id="torrent-description"[^>]*>([\s\S]*?)<\/div>/);
+        if (descMatch) {
+            description = cleanHtmlFromDescription(descMatch[1]);
+        }
+
+        // Extract info hash
         const hashMatch = html.match(/magnet:\?xt=urn:btih:([a-fA-F0-9]{40})/);
-        if (hashMatch) infoHash = hashMatch[1];
+        const infoHash = hashMatch ? hashMatch[1] : "";
 
-        // Extract seeders/leechers from page
-        const seederMatch = html.match(/(\d+)\s*seeders?/i);
-        if (seederMatch) seeders = seederMatch[1];
+        // Try to extract thumbnail from description (same as Aniyomi regex)
+        const imageRegex = /\b(https?:\S+(?:jpg|png|gif|bmp|webp|tiff|jpeg))(?!\.html)\b/i;
+        const imageMatch = description.match(imageRegex);
+        const thumbnail = imageMatch ? imageMatch[1] : "";
 
-        const leecherMatch = html.match(/(\d+)\s*leechers?/i);
-        if (leecherMatch) leechers = leecherMatch[1];
+        // Build genre string (same as Aniyomi: Category, Seeders, Leechers, File Size)
+        const genre = `Category: ${category}, Seeders: ${seeders}, Leechers: ${leechers}, File Size: ${filesize}`;
 
-        // Extract file size
-        const sizeMatch = html.match(/(\d+\.?\d*\s*(?:TiB|GiB|MiB|KiB))/i);
-        if (sizeMatch) size = sizeMatch[1];
-
-        // Extract date
-        const dateMatch = html.match(/<time[^>]*datetime="([^"]+)"/);
-        if (dateMatch) date = dateMatch[1];
-
-        // Extract category
-        const catMatch = html.match(/category[^>]*>([^<]+)</i);
-        if (catMatch) category = catMatch[1].trim();
-
-        // Extract submitter
-        const subMatch = html.match(/submitter[^>]*>([^<]+)</i) || html.match(/class="comment-username"[^>]*>([^<]+)</i);
-        if (subMatch) submitter = subMatch[1].trim();
-
-        trusted = html.includes("fa-check-circle") || html.includes("trusted");
-
-        const description = `Category: ${category}\nSize: ${size}\nDate: ${date}\nSeeders: ${seeders}\nLeechers: ${leechers}\nSubmitter: ${submitter}${trusted ? "\n✓ Trusted" : ""}`;
+        // Combine description with genre info
+        const fullDescription = `${genre}\n\n${description}`;
 
         return JSON.stringify([{
-            description: description,
+            description: fullDescription,
             aliases: infoHash,
-            airdate: date
+            airdate: date,
+            image: thumbnail
         }]);
     } catch (err) {
         console.error("Details error:", err);
@@ -154,6 +174,9 @@ async function extractDetails(url) {
 }
 
 // ─── EPISODES ──────────────────────────────────────────────────────────────────
+// Aniyomi: downloads .torrent file, parses it with TorrentUtils,
+// lists each video file as an episode with magnet &index= param,
+// episodes are reversed so ep1 is at top
 
 async function extractEpisodes(url) {
     try {
@@ -163,17 +186,21 @@ async function extractEpisodes(url) {
         }
         const torrentId = torrentIdMatch[1];
 
-        // Fetch the torrent page to get magnet info
+        // Fetch the view page first to get magnet/hash
         const pageResponse = await soraFetch(url);
         const pageHtml = await pageResponse.text();
 
-        // Extract info hash from magnet link
+        // Extract info hash from page
         const hashMatch = pageHtml.match(/urn:btih:([a-fA-F0-9]{40})/);
         const infoHash = hashMatch ? hashMatch[1] : "";
 
-        // Try to download and parse the .torrent file to get file list
+        // Extract date from page (for episode date)
+        const dateMatch = pageHtml.match(/data-timestamp="(\d+)"/);
+        const torrentDate = dateMatch ? parseInt(dateMatch[1]) * 1000 : 0;
+
+        // Download and parse the .torrent file (same as Aniyomi's TorrentUtils)
         const torrentUrl = `${BASE_URL}/download/${torrentId}.torrent`;
-        
+
         try {
             const torrentResponse = await soraFetch(torrentUrl);
             const torrentBuffer = await torrentResponse.arrayBuffer();
@@ -182,34 +209,63 @@ async function extractEpisodes(url) {
             if (torrentData && torrentData.info) {
                 const files = getTorrentFiles(torrentData);
                 const trackers = getTorrentTrackers(torrentData);
-                const magnetBase = buildMagnetBase(infoHash, torrentData.info.name, trackers);
+                const torrentHash = computeInfoHash(torrentData.info_raw) || infoHash;
+                
+                // Build base magnet (same as Aniyomi: magnet:?xt=urn:btih:{hash}&dn={hash}&tr=...)
+                let magnetBase = `magnet:?xt=urn:btih:${torrentHash}&dn=${torrentHash}`;
+                for (const tracker of trackers) {
+                    if (tracker && tracker.trim()) {
+                        magnetBase += `&tr=${encodeURIComponent(tracker.trim())}`;
+                    }
+                }
 
-                // Filter to video files only
+                // Filter to video files only (same as Aniyomi's validExtensions)
                 const videoFiles = files.filter(f => {
                     const ext = f.path.split(".").pop().toLowerCase();
                     return VALID_EXTENSIONS.has(ext);
                 });
 
                 if (videoFiles.length > 0) {
-                    const episodes = videoFiles.map((file, index) => ({
-                        href: `${magnetBase}&index=${file.index}`,
-                        number: index + 1,
-                        name: file.path.split("/").pop(),
-                        size: formatBytes(file.length)
-                    }));
+                    // Map each video file to an episode (same as Aniyomi)
+                    let episodeNumber = 1;
+                    const episodes = videoFiles.map(file => {
+                        const fileName = file.path.split("/").pop();
+                        const displayName = file.path
+                            .replace(/\[/g, "(")
+                            .replace(/\]/g, ")")
+                            .replace(/\//g, "📂 ");
+                        
+                        const ep = {
+                            href: `${magnetBase}&index=${file.index}`,
+                            number: episodeNumber++,
+                            name: fileName,  // filename only (cleaner display)
+                            path: displayName, // full path with folder icons
+                            size: formatBytes(file.length)
+                        };
+                        return ep;
+                    });
+
+                    // Reverse so ep1 is at top (same as Aniyomi: .reversed())
+                    episodes.reverse();
+
                     return JSON.stringify(episodes);
                 }
             }
         } catch (torrentErr) {
-            console.error("Torrent parse failed, falling back to single episode:", torrentErr);
+            console.error("Torrent parse failed, falling back to single magnet:", torrentErr);
         }
 
-        // Fallback: single episode with magnet link
+        // Fallback: if torrent parse fails, return single episode with magnet
         if (infoHash) {
-            const magnet = buildMagnetLink(infoHash, "");
+            // Try to extract existing magnet from page with trackers
+            const pageMagnet = pageHtml.match(/href="(magnet:\?xt=urn:btih:[^"]+)"/);
+            const magnetLink = pageMagnet ? pageMagnet[1].replace(/&amp;/g, "&") : buildMagnetLink(infoHash, "");
+            
             return JSON.stringify([{
-                href: magnet,
-                number: 1
+                href: magnetLink,
+                number: 1,
+                name: "Magnet Link",
+                size: ""
             }]);
         }
 
@@ -221,43 +277,21 @@ async function extractEpisodes(url) {
 }
 
 // ─── STREAM URL ────────────────────────────────────────────────────────────────
+// Aniyomi: simply returns the magnet URL as the video URL
+// Video(episode.url, episode.name, episode.url)
 
 async function extractStreamUrl(url) {
     try {
-        // If the URL is already a magnet link
+        // The URL is already a magnet link from extractEpisodes
         if (url.startsWith("magnet:")) {
-            const hashMatch = url.match(/urn:btih:([a-fA-F0-9]{40})/);
-            const infoHash = hashMatch ? hashMatch[1] : "";
-            
-            return JSON.stringify({
-                streams: [
-                    {
-                        title: "Magnet Link",
-                        streamUrl: url.replace(/&amp;/g, "&"),
-                        headers: {}
-                    }
-                ],
-                subtitle: "",
-                infoHash: infoHash,
-                magnet: url.replace(/&amp;/g, "&")
-            });
-        }
-
-        // Otherwise fetch the page and extract magnet
-        const response = await soraFetch(url);
-        const html = await response.text();
-
-        // Extract magnet link
-        const magnetMatch = html.match(/href="(magnet:\?xt=urn:btih:[^"]+)"/);
-        if (magnetMatch) {
-            const magnetLink = magnetMatch[1].replace(/&amp;/g, "&");
+            const magnetLink = url.replace(/&amp;/g, "&");
             const hashMatch = magnetLink.match(/urn:btih:([a-fA-F0-9]{40})/);
             const infoHash = hashMatch ? hashMatch[1] : "";
 
             return JSON.stringify({
                 streams: [
                     {
-                        title: "Magnet Link",
+                        title: "Magnet",
                         streamUrl: magnetLink,
                         headers: {}
                     }
@@ -268,39 +302,27 @@ async function extractStreamUrl(url) {
             });
         }
 
-        // Fallback: construct magnet from info hash
-        const hashOnly = html.match(/urn:btih:([a-fA-F0-9]{40})/);
-        if (hashOnly) {
-            const infoHash = hashOnly[1];
-            const magnet = buildMagnetLink(infoHash, "");
+        // If it's a nyaa view page URL, extract magnet from page
+        const response = await soraFetch(url);
+        const html = await response.text();
+
+        const magnetMatch = html.match(/href="(magnet:\?xt=urn:btih:[^"]+)"/);
+        if (magnetMatch) {
+            const magnetLink = magnetMatch[1].replace(/&amp;/g, "&");
+            const hashMatch = magnetLink.match(/urn:btih:([a-fA-F0-9]{40})/);
+            const infoHash = hashMatch ? hashMatch[1] : "";
+
             return JSON.stringify({
                 streams: [
                     {
-                        title: "Magnet Link",
-                        streamUrl: magnet,
+                        title: "Magnet",
+                        streamUrl: magnetLink,
                         headers: {}
                     }
                 ],
                 subtitle: "",
                 infoHash: infoHash,
-                magnet: magnet
-            });
-        }
-
-        // Last fallback: torrent file download
-        const torrentMatch = html.match(/href="(\/download\/\d+\.torrent)"/);
-        if (torrentMatch) {
-            const torrentUrl = BASE_URL + torrentMatch[1];
-            return JSON.stringify({
-                streams: [
-                    {
-                        title: "Torrent Download",
-                        streamUrl: torrentUrl,
-                        headers: { "Referer": BASE_URL + "/" }
-                    }
-                ],
-                subtitle: "",
-                torrentUrl: torrentUrl
+                magnet: magnetLink
             });
         }
 
@@ -311,23 +333,20 @@ async function extractStreamUrl(url) {
     }
 }
 
-// ─── BENCODE DECODER ───────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// BENCODE DECODER - Parses .torrent files (replaces Aniyomi's TorrentUtils)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Decode bencode format (BitTorrent .torrent file format)
- * Supports: integers, byte strings, lists, dictionaries
- */
 function decodeBencode(data) {
     let pos = 0;
 
     function decode() {
         if (pos >= data.length) return null;
-
         const char = String.fromCharCode(data[pos]);
 
         // Integer: i<number>e
         if (char === "i") {
-            pos++; // skip 'i'
+            pos++;
             const end = findChar(data, "e", pos);
             if (end === -1) return null;
             const numStr = bytesToString(data, pos, end);
@@ -337,27 +356,25 @@ function decodeBencode(data) {
 
         // List: l<items>e
         if (char === "l") {
-            pos++; // skip 'l'
+            pos++;
             const list = [];
             while (pos < data.length && String.fromCharCode(data[pos]) !== "e") {
                 list.push(decode());
             }
-            pos++; // skip 'e'
+            pos++;
             return list;
         }
 
         // Dictionary: d<key><value>...e
         if (char === "d") {
-            pos++; // skip 'd'
+            pos++;
             const dict = {};
             while (pos < data.length && String.fromCharCode(data[pos]) !== "e") {
                 const key = decode();
                 const value = decode();
-                if (key !== null) {
-                    dict[key] = value;
-                }
+                if (key !== null) dict[key] = value;
             }
-            pos++; // skip 'e'
+            pos++;
             return dict;
         }
 
@@ -365,18 +382,13 @@ function decodeBencode(data) {
         if (char >= "0" && char <= "9") {
             const colonPos = findChar(data, ":", pos);
             if (colonPos === -1) return null;
-            const lengthStr = bytesToString(data, pos, colonPos);
-            const length = parseInt(lengthStr, 10);
+            const length = parseInt(bytesToString(data, pos, colonPos), 10);
             pos = colonPos + 1;
-
-            // Try to decode as UTF-8 string for keys, keep as string
             const strBytes = data.slice(pos, pos + length);
             pos += length;
-
             try {
                 return utf8Decode(strBytes);
             } catch (e) {
-                // If not valid UTF-8, return hex representation
                 return bytesToHex(strBytes);
             }
         }
@@ -387,9 +399,6 @@ function decodeBencode(data) {
     return decode();
 }
 
-/**
- * Find a character position in byte array
- */
 function findChar(data, char, start) {
     const code = char.charCodeAt(0);
     for (let i = start; i < data.length; i++) {
@@ -398,64 +407,45 @@ function findChar(data, char, start) {
     return -1;
 }
 
-/**
- * Convert bytes to string
- */
 function bytesToString(data, start, end) {
     let str = "";
-    for (let i = start; i < end; i++) {
-        str += String.fromCharCode(data[i]);
-    }
+    for (let i = start; i < end; i++) str += String.fromCharCode(data[i]);
     return str;
 }
 
-/**
- * Decode UTF-8 byte array to string
- */
 function utf8Decode(bytes) {
     let str = "";
     let i = 0;
     while (i < bytes.length) {
-        let byte1 = bytes[i++];
-        if (byte1 < 0x80) {
-            str += String.fromCharCode(byte1);
-        } else if (byte1 >= 0xC0 && byte1 < 0xE0) {
-            let byte2 = bytes[i++];
-            str += String.fromCharCode(((byte1 & 0x1F) << 6) | (byte2 & 0x3F));
-        } else if (byte1 >= 0xE0 && byte1 < 0xF0) {
-            let byte2 = bytes[i++];
-            let byte3 = bytes[i++];
-            str += String.fromCharCode(((byte1 & 0x0F) << 12) | ((byte2 & 0x3F) << 6) | (byte3 & 0x3F));
-        } else if (byte1 >= 0xF0) {
-            let byte2 = bytes[i++];
-            let byte3 = bytes[i++];
-            let byte4 = bytes[i++];
-            let codePoint = ((byte1 & 0x07) << 18) | ((byte2 & 0x3F) << 12) | ((byte3 & 0x3F) << 6) | (byte4 & 0x3F);
-            // Surrogate pair for code points > 0xFFFF
-            codePoint -= 0x10000;
-            str += String.fromCharCode(0xD800 + (codePoint >> 10), 0xDC00 + (codePoint & 0x3FF));
+        let b1 = bytes[i++];
+        if (b1 < 0x80) {
+            str += String.fromCharCode(b1);
+        } else if (b1 >= 0xC0 && b1 < 0xE0) {
+            let b2 = bytes[i++];
+            str += String.fromCharCode(((b1 & 0x1F) << 6) | (b2 & 0x3F));
+        } else if (b1 >= 0xE0 && b1 < 0xF0) {
+            let b2 = bytes[i++], b3 = bytes[i++];
+            str += String.fromCharCode(((b1 & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F));
+        } else if (b1 >= 0xF0) {
+            let b2 = bytes[i++], b3 = bytes[i++], b4 = bytes[i++];
+            let cp = ((b1 & 0x07) << 18) | ((b2 & 0x3F) << 12) | ((b3 & 0x3F) << 6) | (b4 & 0x3F);
+            cp -= 0x10000;
+            str += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF));
         }
     }
     return str;
 }
 
-/**
- * Convert bytes to hex string (for binary data like hashes)
- */
 function bytesToHex(bytes) {
     let hex = "";
-    for (let i = 0; i < bytes.length; i++) {
-        hex += bytes[i].toString(16).padStart(2, "0");
-    }
+    for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
     return hex;
 }
 
-// ─── TORRECT FILE PARSER ──────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// TORRENT FILE HELPERS (same logic as Aniyomi's TorrentUtils)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Extract file list from parsed torrent data
- * Returns array of { path, length, index }
- */
 function getTorrentFiles(torrentData) {
     const info = torrentData.info;
     if (!info) return [];
@@ -463,7 +453,7 @@ function getTorrentFiles(torrentData) {
     const files = [];
 
     if (info.files && Array.isArray(info.files)) {
-        // Multi-file torrent
+        // Multi-file torrent: info.files = [{path: [...], length: N}, ...]
         let fileIndex = 0;
         for (const file of info.files) {
             let path = "";
@@ -472,7 +462,6 @@ function getTorrentFiles(torrentData) {
             } else if (typeof file.path === "string") {
                 path = file.path;
             }
-            
             files.push({
                 path: path,
                 length: file.length || 0,
@@ -492,108 +481,54 @@ function getTorrentFiles(torrentData) {
     return files;
 }
 
-/**
- * Extract tracker list from parsed torrent data
- */
 function getTorrentTrackers(torrentData) {
     const trackers = [];
-
-    // Primary announce URL
-    if (torrentData.announce) {
-        trackers.push(torrentData.announce);
-    }
-
-    // Announce list (nested arrays)
+    if (torrentData.announce) trackers.push(torrentData.announce);
     if (torrentData["announce-list"] && Array.isArray(torrentData["announce-list"])) {
         for (const tier of torrentData["announce-list"]) {
             if (Array.isArray(tier)) {
-                for (const tracker of tier) {
-                    if (typeof tracker === "string" && tracker.trim() && !trackers.includes(tracker)) {
-                        trackers.push(tracker);
-                    }
+                for (const t of tier) {
+                    if (typeof t === "string" && t.trim() && !trackers.includes(t)) trackers.push(t);
                 }
-            } else if (typeof tier === "string" && tier.trim()) {
-                if (!trackers.includes(tier)) trackers.push(tier);
             }
         }
     }
-
     return trackers;
 }
 
-// ─── MAGNET LINK BUILDERS ──────────────────────────────────────────────────────
+function computeInfoHash(infoRaw) {
+    // Can't compute SHA1 in pure JS easily, return empty and use hash from page
+    return "";
+}
 
-/**
- * Build base magnet link with hash, name, and trackers (no index)
- */
-function buildMagnetBase(infoHash, name, trackers) {
+// ═══════════════════════════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function buildMagnetLink(infoHash, displayName) {
     let magnet = `magnet:?xt=urn:btih:${infoHash}`;
-
-    if (name) {
-        magnet += `&dn=${encodeURIComponent(name)}`;
-    }
-
-    // Use provided trackers, or fall back to defaults
-    const trackerList = trackers.length > 0 ? trackers : TRACKERS;
-
-    for (const tracker of trackerList) {
-        if (tracker && tracker.trim()) {
-            magnet += `&tr=${encodeURIComponent(tracker.trim())}`;
-        }
-    }
-
+    if (displayName) magnet += `&dn=${encodeURIComponent(displayName)}`;
+    const defaultTrackers = [
+        "http://nyaa.tracker.wf:7777/announce",
+        "udp://open.stealth.si:80/announce",
+        "udp://tracker.opentrackr.org:1337/announce",
+        "udp://exodus.desync.com:6969/announce",
+        "udp://tracker.torrent.eu.org:451/announce"
+    ];
+    for (const t of defaultTrackers) magnet += `&tr=${encodeURIComponent(t)}`;
     return magnet;
 }
 
-/**
- * Build a complete magnet link from info hash and display name
- */
-function buildMagnetLink(infoHash, displayName) {
-    return buildMagnetBase(infoHash, displayName, TRACKERS);
-}
-
-// ─── UTILITY FUNCTIONS ─────────────────────────────────────────────────────────
-
-/**
- * Format bytes to human-readable size
- */
 function formatBytes(bytes) {
     if (bytes === 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return (bytes / Math.pow(1024, i)).toFixed(2) + " " + units[i];
+    const kb = bytes / 1024.0;
+    const mb = kb / 1024.0;
+    const gb = mb / 1024.0;
+    if (gb >= 1) return gb.toFixed(2) + " GB";
+    if (mb >= 1) return mb.toFixed(2) + " MB";
+    return kb.toFixed(2) + " KB";
 }
 
-/**
- * Extract text content from an XML tag
- */
-function extractXmlTag(xml, tag) {
-    const regex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`);
-    const match = xml.match(regex);
-    return match ? match[1].trim() : "";
-}
-
-/**
- * Extract text content from a custom namespaced XML tag
- */
-function extractXmlCustom(xml, tag) {
-    const regex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`);
-    const match = xml.match(regex);
-    return match ? match[1].trim() : "";
-}
-
-/**
- * Extract torrent ID from a download URL
- */
-function extractTorrentId(url) {
-    if (!url) return "";
-    const match = url.match(/\/download\/(\d+)\.torrent/);
-    return match ? match[1] : "";
-}
-
-/**
- * Clean HTML entities and whitespace from text
- */
 function cleanText(text) {
     if (!text) return "";
     return text
@@ -608,12 +543,29 @@ function cleanText(text) {
         .trim();
 }
 
-/**
- * soraFetch - Fetch wrapper with fallback
- */
+function cleanHtmlFromDescription(text) {
+    if (!text) return "";
+    return text
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, "$2 ($1)")
+        .replace(/<i[^>]*>(.*?)<\/i>/gi, "$1")
+        .replace(/<b[^>]*>(.*?)<\/b>/gi, "$1")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&#10;/g, "\n")
+        .replace(/&#8217;/g, "'")
+        .replace(/&#8211;/g, "-")
+        .replace(/&#039;/g, "'")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#[0-9]+;/g, "")
+        .trim();
+}
+
 async function soraFetch(url, options = {}) {
     try {
-        const headers = options.headers || {};
+        const headers = options.headers || { "Referer": BASE_URL + "/" };
         const method = options.method || "GET";
         const body = options.body || null;
         return await fetchv2(url, headers, method, body);
