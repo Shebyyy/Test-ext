@@ -1,6 +1,10 @@
 // Cineby source module - Based on cineby.sc (uses videasy.net backend)
 // Thanks ibro for the TMDB search!
 
+const SOURCE_NAME = "Cineby";
+const PROXY_URL = "https://passthrough-worker.simplepostrequest.workers.dev";
+const REFERER = "https%3A%2F%2Fwww.cineby.sc%2F";
+
 async function searchResults(keyword) {
     try {
         let transformedResults = [];
@@ -183,6 +187,48 @@ async function extractEpisodes(url) {
     }
 }
 
+function buildStreamsAndSubtitles(sources, subtitles) {
+    const nonHDRSources = sources.filter(s => !s.quality.includes("HDR"));
+
+    // Build stream objects with descriptive titles: "Cineby - 1080p"
+    const streamObjects = nonHDRSources.map(src => ({
+        title: `${SOURCE_NAME} - ${src.quality}`,
+        streamUrl: src.url,
+        headers: {
+            "Origin": "https://www.cineby.sc",
+            "Referer": "https://www.cineby.sc/"
+        }
+    }));
+
+    // Build subtitle objects with numbered providers per language
+    // e.g. "English (1)", "English (2)", "Arabic (1)", etc.
+    const langCount = {};
+    const subtitleObjects = subtitles.map(sub => {
+        const lang = sub.language || sub.lang || "Unknown";
+        const url = sub.url || "";
+        if (!url) return null;
+
+        langCount[lang] = (langCount[lang] || 0) + 1;
+        const count = langCount[lang];
+
+        // If multiple subs for same language, number them
+        const label = count > 1 ? `${lang} (${count})` : lang;
+
+        const proxiedUrl = `${PROXY_URL}/?url=${encodeURIComponent(url)}&type=vtt&referer=${REFERER}`;
+        return {
+            lang: label,
+            url: proxiedUrl
+        };
+    }).filter(Boolean);
+
+    console.log('Streams found: ' + streamObjects.length + ', Subtitles found: ' + subtitleObjects.length);
+
+    return {
+        streams: streamObjects,
+        subtitles: subtitleObjects
+    };
+}
+
 async function extractStreamUrl(ID) {
     if (ID.includes('movie')) {
         const tmdbID = ID.replace('/movie/', '');
@@ -220,28 +266,7 @@ async function extractStreamUrl(ID) {
         const sources = result.sources || [];
         const subtitles = result.subtitles || [];
 
-        const nonHDRSources = sources.filter(s => !s.quality.includes("HDR"));
-
-        const streamObjects = nonHDRSources.map(src => ({
-            title: src.quality,
-            streamUrl: src.url,
-            headers: {
-                "Origin": "https://www.cineby.sc",
-                "Referer": "https://www.cineby.sc/"
-            }
-        }));
-
-        const englishSubtitle = subtitles.find(sub => (sub.language || sub.lang)?.toLowerCase() === 'english');
-        let subtitleUrl = englishSubtitle ? englishSubtitle.url : "";
-
-        if (subtitleUrl) {
-            subtitleUrl = `https://passthrough-worker.simplepostrequest.workers.dev/?url=${encodeURIComponent(subtitleUrl)}&type=vtt&referer=https%3A%2F%2Fwww.cineby.sc%2F`;
-        }
-
-        return JSON.stringify({
-            streams: streamObjects,
-            subtitles: subtitleUrl
-        });
+        return JSON.stringify(buildStreamsAndSubtitles(sources, subtitles));
     } else if (ID.includes('tv')) {
         const parts = ID.split('/');
         const tmdbID = parts[2];
@@ -282,28 +307,7 @@ async function extractStreamUrl(ID) {
         const sources = result.sources || [];
         const subtitles = result.subtitles || [];
 
-        const nonHDRSources = sources.filter(s => !s.quality.includes("HDR"));
-
-        const streamObjects = nonHDRSources.map(src => ({
-            title: src.quality,
-            streamUrl: src.url,
-            headers: {
-                "Origin": "https://www.cineby.sc",
-                "Referer": "https://www.cineby.sc/"
-            }
-        }));
-
-        const englishSubtitle = subtitles.find(sub => (sub.language || sub.lang)?.toLowerCase() === 'english');
-        let subtitleUrl = englishSubtitle ? englishSubtitle.url : "";
-
-        if (subtitleUrl) {
-            subtitleUrl = `https://passthrough-worker.simplepostrequest.workers.dev/?url=${encodeURIComponent(subtitleUrl)}&type=vtt&referer=https%3A%2F%2Fwww.cineby.sc%2F`;
-        }
-
-        return JSON.stringify({
-            streams: streamObjects,
-            subtitles: subtitleUrl
-        });
+        return JSON.stringify(buildStreamsAndSubtitles(sources, subtitles));
     }
 }
 
