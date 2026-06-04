@@ -1,0 +1,27 @@
+{
+    "sourceName": "Cineby",
+    "iconUrl": "https://www.cineby.sc/logo.png",
+    "author": {
+        "name": "Sheby",
+        "icon": "https://avatars.githubusercontent.com/u/83452219?v=4"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "4K",
+    "baseUrl": "https://www.cineby.sc/",
+    "searchBaseUrl": "https://www.cineby.sc/",
+    "scriptUrl": "https://raw.githubusercontent.com/Shebyyy/Test-ext/main/cineby/cineby.js",
+    "type": "shows/movies/anime",
+    "asyncJS": true,
+    "softsub": true,
+    "downloadSupport": false,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "supportsDartotsu": true,
+    "supportsMojuru": true,
+    "supportsAnymex": true,
+    "supportsTsumi": true,
+    "supportsHiyoku": true,
+    "supportsShirox": true
+}
