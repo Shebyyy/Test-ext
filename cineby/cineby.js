@@ -1,6 +1,4 @@
 // Cineby source module - Based on cineby.sc (uses videasy.net backend)
-// Multi-server support: Neon, Yoru, Cypher, Killjoy, Omen
-// Thanks ibro for the TMDB search!
 
 const API_BASE = "https://api.videasy.net";
 const TMDB_BASE = "https://db.videasy.net";
@@ -8,13 +6,13 @@ const PROXY_URL = "https://passthrough-worker.simplepostrequest.workers.dev";
 const REFERER = "https%3A%2F%2Fwww.cineby.sc%2F";
 const SOURCE_NAME = "Cineby";
 
-// Server definitions matching cineby.sc
-const SERVERS = [
-    { name: "Neon",   path: "/mb-flix/sources-with-title",  note: "Original audio", flag: "🇺🇸" },
-    { name: "Yoru",   path: "/cdn/sources-with-title",      note: "May have 4K",     flag: "🇺🇸" },
-    { name: "Cypher", path: "/downloader2/sources-with-title", note: "Original audio", flag: "🇺🇸" },
-    { name: "Killjoy",path: "/meine/sources-with-title",    note: "German audio",    flag: "🇩🇪", extraParams: "&language=german" },
-    { name: "Omen",   path: "/lamovie/sources-with-title",  note: "Spanish audio",   flag: "🇲🇽" },
+// Known API endpoints on videasy.net
+const SERVER_PATHS = [
+    { name: "Neon",   path: "/mb-flix/sources-with-title" },
+    { name: "Yoru",   path: "/cdn/sources-with-title" },
+    { name: "Cypher", path: "/downloader2/sources-with-title" },
+    { name: "Killjoy",path: "/meine/sources-with-title" },
+    { name: "Omen",   path: "/lamovie/sources-with-title" },
 ];
 
 async function searchResults(keyword) {
@@ -198,48 +196,9 @@ async function extractEpisodes(url) {
     }
 }
 
-function buildStreamsAndSubtitles(sources, subtitles, serverName, serverNote, serverFlag) {
-    const nonHDRSources = sources.filter(s => !s.quality.includes("HDR"));
-
-    // Build stream objects with server name, flag, quality
-    const streamObjects = nonHDRSources.map(src => ({
-        title: `${SOURCE_NAME} ${serverFlag} ${serverName} - ${src.quality}`,
-        streamUrl: src.url,
-        headers: {
-            "Origin": "https://www.cineby.sc",
-            "Referer": "https://www.cineby.sc/"
-        }
-    }));
-
-    // Build subtitle objects with numbered providers per language
-    const langCount = {};
-    const subtitleObjects = subtitles.map(sub => {
-        const lang = sub.language || sub.lang || "Unknown";
-        const url = sub.url || "";
-        if (!url) return null;
-
-        langCount[lang] = (langCount[lang] || 0) + 1;
-        const count = langCount[lang];
-        const label = count > 1 ? `${lang} (${count})` : lang;
-
-        const proxiedUrl = `${PROXY_URL}/?url=${encodeURIComponent(url)}&type=vtt&referer=${REFERER}`;
-        return {
-            lang: label,
-            url: proxiedUrl
-        };
-    }).filter(Boolean);
-
-    console.log(`Server ${serverName}: ${streamObjects.length} streams, ${subtitleObjects.length} subs`);
-
-    return {
-        streams: streamObjects,
-        subtitles: subtitleObjects
-    };
-}
-
-async function fetchServerSources(server, params) {
+async function fetchServerSources(serverName, serverPath, params) {
     try {
-        const url = `${API_BASE}${server.path}?title=${params.title}&mediaType=${params.mediaType}&year=${params.year}&episodeId=${params.episodeId}&seasonId=${params.seasonId}&tmdbId=${params.tmdbId}&imdbId=${params.imdbId}&totalSeasons=${params.totalSeasons || 1}${server.extraParams || ''}`;
+        const url = `${API_BASE}${serverPath}?title=${params.title}&mediaType=${params.mediaType}&year=${params.year}&episodeId=${params.episodeId}&seasonId=${params.seasonId}&tmdbId=${params.tmdbId}&imdbId=${params.imdbId}&totalSeasons=${params.totalSeasons || 1}`;
         
         const responseText = await soraFetch(url);
         if (!responseText) return null;
@@ -270,9 +229,43 @@ async function fetchServerSources(server, params) {
 
         if (sources.length === 0) return null;
 
-        return buildStreamsAndSubtitles(sources, subtitles, server.name, server.note, server.flag);
+        // Build streams — just server name + whatever quality the API gives
+        const nonHDRSources = sources.filter(s => !s.quality.includes("HDR"));
+        const streamObjects = nonHDRSources.map(src => ({
+            title: `${SOURCE_NAME} ${serverName} - ${src.quality}`,
+            streamUrl: src.url,
+            headers: {
+                "Origin": "https://www.cineby.sc",
+                "Referer": "https://www.cineby.sc/"
+            }
+        }));
+
+        // Build subtitles — return whatever the API gives, no filtering
+        const langCount = {};
+        const subtitleObjects = subtitles.map(sub => {
+            const lang = sub.language || sub.lang || "Unknown";
+            const url = sub.url || "";
+            if (!url) return null;
+
+            langCount[lang] = (langCount[lang] || 0) + 1;
+            const count = langCount[lang];
+            const label = count > 1 ? `${lang} (${count})` : lang;
+
+            const proxiedUrl = `${PROXY_URL}/?url=${encodeURIComponent(url)}&type=vtt&referer=${REFERER}`;
+            return {
+                lang: label,
+                url: proxiedUrl
+            };
+        }).filter(Boolean);
+
+        console.log(`Server ${serverName}: ${streamObjects.length} streams, ${subtitleObjects.length} subs`);
+
+        return {
+            streams: streamObjects,
+            subtitles: subtitleObjects
+        };
     } catch (e) {
-        console.log(`Server ${server.name} failed: ${e}`);
+        console.log(`Server ${serverName} failed: ${e}`);
         return null;
     }
 }
@@ -320,11 +313,13 @@ async function extractStreamUrl(ID) {
 
     console.log('Stream params: ' + JSON.stringify(params));
 
-    // Fetch from all servers in parallel
-    const serverPromises = SERVERS.map(server => fetchServerSources(server, params));
+    // Fetch from all servers in parallel — return whatever each one gives
+    const serverPromises = SERVER_PATHS.map(server => 
+        fetchServerSources(server.name, server.path, params)
+    );
     const serverResults = await Promise.all(serverPromises);
 
-    // Merge all results into one combined output
+    // Merge all results
     let allStreams = [];
     let allSubtitles = [];
 
