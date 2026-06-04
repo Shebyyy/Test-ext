@@ -8,18 +8,18 @@ const PROXY_URL = "https://passthrough-worker.simplepostrequest.workers.dev";
 const REFERER = "https%3A%2F%2Fwww.cineby.sc%2F";
 const SOURCE_NAME = "Cineby";
 
-// All servers from cineby.sc â€” lang = audio language, same as site shows
+// All servers from cineby.sc â€” audioLang is what the user cares about
 const SERVERS = [
-    { name: "Neon",    path: "/mb-flix/sources-with-title",      lang: "ðŸ‡ºðŸ‡¸" },
-    { name: "Yoru",    path: "/cdn/sources-with-title",          lang: "ðŸ‡ºðŸ‡¸" },
-    { name: "Cypher",  path: "/downloader2/sources-with-title",  lang: "ðŸ‡ºðŸ‡¸" },
-    { name: "Sage",    path: "/1movies/sources-with-title",      lang: "ðŸ‡ºðŸ‡¸" },
-    { name: "Breach",  path: "/m4uhd/sources-with-title",        lang: "ðŸ‡ºðŸ‡¸" },
-    { name: "Vyse",    path: "/hdmovie/sources-with-title",      lang: "ðŸ‡ºðŸ‡¸", qualityFilter: "English" },
-    { name: "Killjoy", path: "/meine/sources-with-title",        lang: "ðŸ‡©ðŸ‡ª", extraParams: { language: "german" } },
-    { name: "Fade",    path: "/hdmovie/sources-with-title",      lang: "ðŸ‡®ðŸ‡³", qualityFilter: "Hindi" },
-    { name: "Omen",    path: "/lamovie/sources-with-title",      lang: "ðŸ‡²ðŸ‡½" },
-    { name: "Raze",    path: "/superflix/sources-with-title",    lang: "ðŸ‡§ðŸ‡·" },
+    { name: "Neon",    path: "/mb-flix/sources-with-title",      flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
+    { name: "Yoru",    path: "/cdn/sources-with-title",          flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
+    { name: "Cypher",  path: "/downloader2/sources-with-title",  flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
+    { name: "Sage",    path: "/1movies/sources-with-title",      flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
+    { name: "Breach",  path: "/m4uhd/sources-with-title",        flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
+    { name: "Vyse",    path: "/hdmovie/sources-with-title",      flag: "ðŸ‡ºðŸ‡¸", audioLang: "English", qualityFilter: "English" },
+    { name: "Killjoy", path: "/meine/sources-with-title",        flag: "ðŸ‡©ðŸ‡ª", audioLang: "German",  extraParams: { language: "german" } },
+    { name: "Fade",    path: "/hdmovie/sources-with-title",      flag: "ðŸ‡®ðŸ‡³", audioLang: "Hindi",   qualityFilter: "Hindi" },
+    { name: "Omen",    path: "/lamovie/sources-with-title",      flag: "ðŸ‡²ðŸ‡½", audioLang: "Spanish" },
+    { name: "Raze",    path: "/superflix/sources-with-title",    flag: "ðŸ‡§ðŸ‡·", audioLang: "Portuguese" },
 ];
 
 async function searchResults(keyword) {
@@ -251,9 +251,9 @@ async function fetchServerSources(server, params) {
 
         if (sources.length === 0) return null;
 
-        // Build streams â€” server name + audio lang flag + quality
+        // Build streams â€” audio language + flag + quality + server name for uniqueness
         const streamObjects = sources.map(src => ({
-            title: `${SOURCE_NAME} ${server.lang} ${server.name} - ${src.quality}`,
+            title: `${SOURCE_NAME} ${server.audioLang} - ${src.quality} (${server.name})`,
             streamUrl: src.url,
             headers: {
                 "Origin": "https://www.cineby.sc",
@@ -295,7 +295,7 @@ async function extractStreamUrl(ID) {
     let params;
     
     if (ID.includes('movie')) {
-        const tmdbID = ID.replace('/movie/', '');
+        const tmdbID = ID.replace('movie/', '').replace('/movie/', '');
         const response = await soraFetch(`${TMDB_BASE}/3/movie/${tmdbID}?append_to_response=external_ids&language=en`);
         const data = await response.json();
 
@@ -310,10 +310,10 @@ async function extractStreamUrl(ID) {
             totalSeasons: 1
         };
     } else if (ID.includes('tv')) {
-        const parts = ID.split('/');
-        const tmdbID = parts[2];
-        const seasonNumber = parts[3];
-        const episodeNumber = parts[4];
+        const parts = ID.split('/').filter(Boolean);
+        const tmdbID = parts[1];
+        const seasonNumber = parts[2];
+        const episodeNumber = parts[3];
 
         const response = await soraFetch(`${TMDB_BASE}/3/tv/${tmdbID}?append_to_response=external_ids&language=en`);
         const data = await response.json();
