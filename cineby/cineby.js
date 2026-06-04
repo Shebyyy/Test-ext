@@ -1,4 +1,6 @@
 // Cineby source module - Based on cineby.sc (uses videasy.net backend)
+// All 10 servers matching the site exactly
+// Thanks ibro for the TMDB search!
 
 const API_BASE = "https://api.videasy.net";
 const TMDB_BASE = "https://db.videasy.net";
@@ -6,13 +8,18 @@ const PROXY_URL = "https://passthrough-worker.simplepostrequest.workers.dev";
 const REFERER = "https%3A%2F%2Fwww.cineby.sc%2F";
 const SOURCE_NAME = "Cineby";
 
-// Known API endpoints on videasy.net
-const SERVER_PATHS = [
-    { name: "Neon",   path: "/mb-flix/sources-with-title" },
-    { name: "Yoru",   path: "/cdn/sources-with-title" },
-    { name: "Cypher", path: "/downloader2/sources-with-title" },
-    { name: "Killjoy",path: "/meine/sources-with-title" },
-    { name: "Omen",   path: "/lamovie/sources-with-title" },
+// All servers from cineby.sc â€” lang = audio language, same as site shows
+const SERVERS = [
+    { name: "Neon",    path: "/mb-flix/sources-with-title",      lang: "ðŸ‡ºðŸ‡¸" },
+    { name: "Yoru",    path: "/cdn/sources-with-title",          lang: "ðŸ‡ºðŸ‡¸" },
+    { name: "Cypher",  path: "/downloader2/sources-with-title",  lang: "ðŸ‡ºðŸ‡¸" },
+    { name: "Sage",    path: "/1movies/sources-with-title",      lang: "ðŸ‡ºðŸ‡¸" },
+    { name: "Breach",  path: "/m4uhd/sources-with-title",        lang: "ðŸ‡ºðŸ‡¸" },
+    { name: "Vyse",    path: "/hdmovie/sources-with-title",      lang: "ðŸ‡ºðŸ‡¸", qualityFilter: "English" },
+    { name: "Killjoy", path: "/meine/sources-with-title",        lang: "ðŸ‡©ðŸ‡ª", extraParams: { language: "german" } },
+    { name: "Fade",    path: "/hdmovie/sources-with-title",      lang: "ðŸ‡®ðŸ‡³", qualityFilter: "Hindi" },
+    { name: "Omen",    path: "/lamovie/sources-with-title",      lang: "ðŸ‡²ðŸ‡½" },
+    { name: "Raze",    path: "/superflix/sources-with-title",    lang: "ðŸ‡§ðŸ‡·" },
 ];
 
 async function searchResults(keyword) {
@@ -196,9 +203,16 @@ async function extractEpisodes(url) {
     }
 }
 
-async function fetchServerSources(serverName, serverPath, params) {
+async function fetchServerSources(server, params) {
     try {
-        const url = `${API_BASE}${serverPath}?title=${params.title}&mediaType=${params.mediaType}&year=${params.year}&episodeId=${params.episodeId}&seasonId=${params.seasonId}&tmdbId=${params.tmdbId}&imdbId=${params.imdbId}&totalSeasons=${params.totalSeasons || 1}`;
+        // Build query params â€” server-specific extras like language=german for Killjoy
+        let queryParams = `title=${params.title}&mediaType=${params.mediaType}&year=${params.year}&episodeId=${params.episodeId}&seasonId=${params.seasonId}&tmdbId=${params.tmdbId}&imdbId=${params.imdbId}&totalSeasons=${params.totalSeasons || 1}`;
+        if (server.extraParams) {
+            for (const [key, val] of Object.entries(server.extraParams)) {
+                queryParams += `&${key}=${encodeURIComponent(val)}`;
+            }
+        }
+        const url = `${API_BASE}${server.path}?${queryParams}`;
         
         const responseText = await soraFetch(url);
         if (!responseText) return null;
@@ -224,15 +238,22 @@ async function fetchServerSources(serverName, serverPath, params) {
         if (!decryptedData || !decryptedData.result) return null;
 
         const result = decryptedData.result;
-        const sources = result.sources || [];
+        let sources = result.sources || [];
         const subtitles = result.subtitles || [];
+
+        // Apply server-specific quality filter (Fade=Hindi, Vyse=English)
+        if (server.qualityFilter) {
+            sources = sources.filter(s => s.quality === server.qualityFilter);
+        }
+
+        // Filter out HDR sources
+        sources = sources.filter(s => !s.quality.includes("HDR"));
 
         if (sources.length === 0) return null;
 
-        // Build streams — just server name + whatever quality the API gives
-        const nonHDRSources = sources.filter(s => !s.quality.includes("HDR"));
-        const streamObjects = nonHDRSources.map(src => ({
-            title: `${SOURCE_NAME} ${serverName} - ${src.quality}`,
+        // Build streams â€” server name + audio lang flag + quality
+        const streamObjects = sources.map(src => ({
+            title: `${SOURCE_NAME} ${server.lang} ${server.name} - ${src.quality}`,
             streamUrl: src.url,
             headers: {
                 "Origin": "https://www.cineby.sc",
@@ -240,7 +261,7 @@ async function fetchServerSources(serverName, serverPath, params) {
             }
         }));
 
-        // Build subtitles — return whatever the API gives, no filtering
+        // Build subtitles â€” return whatever the API gives
         const langCount = {};
         const subtitleObjects = subtitles.map(sub => {
             const lang = sub.language || sub.lang || "Unknown";
@@ -258,14 +279,14 @@ async function fetchServerSources(serverName, serverPath, params) {
             };
         }).filter(Boolean);
 
-        console.log(`Server ${serverName}: ${streamObjects.length} streams, ${subtitleObjects.length} subs`);
+        console.log(`Server ${server.name}: ${streamObjects.length} streams, ${subtitleObjects.length} subs`);
 
         return {
             streams: streamObjects,
             subtitles: subtitleObjects
         };
     } catch (e) {
-        console.log(`Server ${serverName} failed: ${e}`);
+        console.log(`Server ${server.name} failed: ${e}`);
         return null;
     }
 }
@@ -313,10 +334,8 @@ async function extractStreamUrl(ID) {
 
     console.log('Stream params: ' + JSON.stringify(params));
 
-    // Fetch from all servers in parallel — return whatever each one gives
-    const serverPromises = SERVER_PATHS.map(server => 
-        fetchServerSources(server.name, server.path, params)
-    );
+    // Fetch from all 10 servers in parallel
+    const serverPromises = SERVERS.map(server => fetchServerSources(server, params));
     const serverResults = await Promise.all(serverPromises);
 
     // Merge all results
