@@ -1,7 +1,3 @@
-// Cineby source module - Based on cineby.sc (uses videasy.net backend)
-// All 10 servers matching the site exactly
-// Thanks ibro for the TMDB search!
-
 const API_BASE = "https://api.videasy.net";
 const TMDB_BASE = "https://db.videasy.net";
 const PROXY_URL = "https://passthrough-worker.simplepostrequest.workers.dev";
@@ -10,16 +6,16 @@ const SOURCE_NAME = "Cineby";
 
 // All servers from cineby.sc â€” audioLang is what the user cares about
 const SERVERS = [
-    { name: "Neon",    path: "/mb-flix/sources-with-title",      flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
-    { name: "Yoru",    path: "/cdn/sources-with-title",          flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
-    { name: "Cypher",  path: "/downloader2/sources-with-title",  flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
-    { name: "Sage",    path: "/1movies/sources-with-title",      flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
-    { name: "Breach",  path: "/m4uhd/sources-with-title",        flag: "ðŸ‡ºðŸ‡¸", audioLang: "English" },
-    { name: "Vyse",    path: "/hdmovie/sources-with-title",      flag: "ðŸ‡ºðŸ‡¸", audioLang: "English", qualityFilter: "English" },
-    { name: "Killjoy", path: "/meine/sources-with-title",        flag: "ðŸ‡©ðŸ‡ª", audioLang: "German",  extraParams: { language: "german" } },
-    { name: "Fade",    path: "/hdmovie/sources-with-title",      flag: "ðŸ‡®ðŸ‡³", audioLang: "Hindi",   qualityFilter: "Hindi" },
-    { name: "Omen",    path: "/lamovie/sources-with-title",      flag: "ðŸ‡²ðŸ‡½", audioLang: "Spanish" },
-    { name: "Raze",    path: "/superflix/sources-with-title",    flag: "ðŸ‡§ðŸ‡·", audioLang: "Portuguese" },
+    { name: "Neon",    path: "/mb-flix/sources-with-title",      audioLang: "English" },
+    { name: "Yoru",    path: "/cdn/sources-with-title",          audioLang: "English" },
+    { name: "Cypher",  path: "/downloader2/sources-with-title",  audioLang: "English" },
+    { name: "Sage",    path: "/1movies/sources-with-title",      audioLang: "English" },
+    { name: "Breach",  path: "/m4uhd/sources-with-title",        audioLang: "English" },
+    { name: "Vyse",    path: "/hdmovie/sources-with-title",      audioLang: "English", qualityFilter: "English" },
+    { name: "Killjoy", path: "/meine/sources-with-title",        audioLang: "German",  extraParams: { language: "german" } },
+    { name: "Fade",    path: "/hdmovie/sources-with-title",      audioLang: "Hindi",   qualityFilter: "Hindi" },
+    { name: "Omen",    path: "/lamovie/sources-with-title",      audioLang: "Spanish" },
+    { name: "Raze",    path: "/superflix/sources-with-title",    audioLang: "Portuguese" },
 ];
 
 async function searchResults(keyword) {
@@ -251,7 +247,7 @@ async function fetchServerSources(server, params) {
 
         if (sources.length === 0) return null;
 
-        // Build streams â€” audio language + flag + quality + server name for uniqueness
+        // Build streams â€” audio language + quality + server name for uniqueness
         const streamObjects = sources.map(src => ({
             title: `${SOURCE_NAME} ${server.audioLang} - ${src.quality} (${server.name})`,
             streamUrl: src.url,
@@ -261,29 +257,23 @@ async function fetchServerSources(server, params) {
             }
         }));
 
-        // Build subtitles â€” return whatever the API gives
-        const langCount = {};
-        const subtitleObjects = subtitles.map(sub => {
-            const lang = sub.language || sub.lang || "Unknown";
-            const url = sub.url || "";
-            if (!url) return null;
+        // Build subtitle URL â€” Sora expects a single URL string, not an array
+        // Pick English subtitle if available, otherwise first subtitle
+        let subtitleUrl = "";
+        const englishSub = subtitles.find(sub => (sub.language || sub.lang)?.toLowerCase() === 'english');
+        const fallbackSub = subtitles.length > 0 ? subtitles[0] : null;
+        const chosenSub = englishSub || fallbackSub;
 
-            langCount[lang] = (langCount[lang] || 0) + 1;
-            const count = langCount[lang];
-            const label = count > 1 ? `${lang} (${count})` : lang;
+        if (chosenSub && chosenSub.url) {
+            subtitleUrl = `${PROXY_URL}/?url=${encodeURIComponent(chosenSub.url)}&type=vtt&referer=${REFERER}`;
+        }
 
-            const proxiedUrl = `${PROXY_URL}/?url=${encodeURIComponent(url)}&type=vtt&referer=${REFERER}`;
-            return {
-                lang: label,
-                url: proxiedUrl
-            };
-        }).filter(Boolean);
-
-        console.log(`Server ${server.name}: ${streamObjects.length} streams, ${subtitleObjects.length} subs`);
+        console.log(`Server ${server.name}: ${streamObjects.length} streams, sub: ${subtitleUrl ? 'yes' : 'no'}`);
 
         return {
             streams: streamObjects,
-            subtitles: subtitleObjects
+            subtitles: subtitleUrl,
+            serverName: server.name
         };
     } catch (e) {
         console.log(`Server ${server.name} failed: ${e}`);
@@ -329,7 +319,7 @@ async function extractStreamUrl(ID) {
             totalSeasons: data.number_of_seasons || 1
         };
     } else {
-        return JSON.stringify({ streams: [], subtitles: [] });
+        return JSON.stringify({ streams: [], subtitles: "" });
     }
 
     console.log('Stream params: ' + JSON.stringify(params));
@@ -345,23 +335,28 @@ async function extractStreamUrl(ID) {
     for (const result of serverResults) {
         if (!result) continue;
         allStreams = allStreams.concat(result.streams);
-        allSubtitles = allSubtitles.concat(result.subtitles);
+        // Collect subtitle URLs with server priority (Yoru > Neon > others)
+        if (result.subtitles) {
+            allSubtitles.push({ url: result.subtitles, server: result.serverName });
+        }
     }
 
-    // Deduplicate subtitles by lang+url
-    const seenSubs = new Set();
-    allSubtitles = allSubtitles.filter(sub => {
-        const key = sub.lang + '|' + sub.url;
-        if (seenSubs.has(key)) return false;
-        seenSubs.add(key);
-        return true;
-    });
+    // Pick best subtitle: prefer Yoru (most subs), then Neon, then first available
+    const subPriority = ["Yoru", "Neon", "Cypher", "Sage", "Breach"];
+    let subtitleUrl = "";
+    for (const pref of subPriority) {
+        const found = allSubtitles.find(s => s.server === pref);
+        if (found) { subtitleUrl = found.url; break; }
+    }
+    if (!subtitleUrl && allSubtitles.length > 0) {
+        subtitleUrl = allSubtitles[0].url;
+    }
 
-    console.log(`Total: ${allStreams.length} streams from ${serverResults.filter(Boolean).length} servers, ${allSubtitles.length} subtitles`);
+    console.log(`Total: ${allStreams.length} streams from ${serverResults.filter(Boolean).length} servers, sub: ${subtitleUrl ? 'yes' : 'no'}`);
 
     return JSON.stringify({
         streams: allStreams,
-        subtitles: allSubtitles
+        subtitles: subtitleUrl
     });
 }
 
