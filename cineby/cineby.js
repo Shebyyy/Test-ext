@@ -259,13 +259,22 @@ async function fetchServerSources(server, params) {
 
         // Build subtitle URL â€” Sora expects a single URL string, not an array
         // Pick English subtitle if available, otherwise first subtitle
+        // Note: language can be "English", "English - English", "English - English British", etc.
         let subtitleUrl = "";
-        const englishSub = subtitles.find(sub => (sub.language || sub.lang)?.toLowerCase() === 'english');
+        const englishSub = subtitles.find(sub => (sub.language || sub.lang)?.toLowerCase().startsWith('english'));
         const fallbackSub = subtitles.length > 0 ? subtitles[0] : null;
         const chosenSub = englishSub || fallbackSub;
 
         if (chosenSub && chosenSub.url) {
-            subtitleUrl = `${PROXY_URL}/?url=${encodeURIComponent(chosenSub.url)}&type=vtt&referer=${REFERER}`;
+            // Some CDNs (boopigcdn.com, hakunaymatata.com) allow direct access
+            // Others (awesomehappiness.com) need proxy â€” only proxy when needed
+            const subUrl = chosenSub.url;
+            const needsProxy = subUrl.includes('awesomehappiness.com');
+            if (needsProxy) {
+                subtitleUrl = `${PROXY_URL}/?url=${encodeURIComponent(subUrl)}&type=vtt&referer=${REFERER}`;
+            } else {
+                subtitleUrl = subUrl;
+            }
         }
 
         console.log(`Server ${server.name}: ${streamObjects.length} streams, sub: ${subtitleUrl ? 'yes' : 'no'}`);
