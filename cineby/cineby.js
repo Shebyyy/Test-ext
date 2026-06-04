@@ -1,9 +1,21 @@
 // Cineby source module - Based on cineby.sc (uses videasy.net backend)
+// Multi-server support: Neon, Yoru, Cypher, Killjoy, Omen
 // Thanks ibro for the TMDB search!
 
-const SOURCE_NAME = "Cineby";
+const API_BASE = "https://api.videasy.net";
+const TMDB_BASE = "https://db.videasy.net/3";
 const PROXY_URL = "https://passthrough-worker.simplepostrequest.workers.dev";
 const REFERER = "https%3A%2F%2Fwww.cineby.sc%2F";
+const SOURCE_NAME = "Cineby";
+
+// Server definitions matching cineby.sc
+const SERVERS = [
+    { name: "Neon",   path: "/mb-flix/sources-with-title",  note: "Original audio", flag: "🇺🇸" },
+    { name: "Yoru",   path: "/cdn/sources-with-title",      note: "May have 4K",     flag: "🇺🇸" },
+    { name: "Cypher", path: "/downloader2/sources-with-title", note: "Original audio", flag: "🇺🇸" },
+    { name: "Killjoy",path: "/meine/sources-with-title",    note: "German audio",    flag: "🇩🇪", extraParams: "&language=german" },
+    { name: "Omen",   path: "/lamovie/sources-with-title",  note: "Spanish audio",   flag: "🇲🇽" },
+];
 
 async function searchResults(keyword) {
     try {
@@ -20,22 +32,21 @@ async function searchResults(keyword) {
         const skipTitleFilter = Object.values(keywordGroups).flat();
         const shouldFilter = !matchesKeyword(keyword, skipTitleFilter);
 
-        // --- TMDB Section ---
         const encodedKeyword = encodeURIComponent(keyword);
         let baseUrlTemplate = null;
 
         if (matchesKeyword(keyword, keywordGroups.trending)) {
-            baseUrlTemplate = (page) => `https://db.videasy.net/3/trending/all/week?language=en&page=${page}`;
+            baseUrlTemplate = (page) => `${TMDB_BASE}/3/trending/all/week?language=en&page=${page}`;
         } else if (matchesKeyword(keyword, keywordGroups.topRatedMovie)) {
-            baseUrlTemplate = (page) => `https://db.videasy.net/3/movie/top_rated?language=en&page=${page}`;
+            baseUrlTemplate = (page) => `${TMDB_BASE}/3/movie/top_rated?language=en&page=${page}`;
         } else if (matchesKeyword(keyword, keywordGroups.topRatedTV)) {
-            baseUrlTemplate = (page) => `https://db.videasy.net/3/tv/top_rated?language=en&page=${page}`;
+            baseUrlTemplate = (page) => `${TMDB_BASE}/3/tv/top_rated?language=en&page=${page}`;
         } else if (matchesKeyword(keyword, keywordGroups.popularMovie)) {
-            baseUrlTemplate = (page) => `https://db.videasy.net/3/movie/popular?language=en&page=${page}`;
+            baseUrlTemplate = (page) => `${TMDB_BASE}/3/movie/popular?language=en&page=${page}`;
         } else if (matchesKeyword(keyword, keywordGroups.popularTV)) {
-            baseUrlTemplate = (page) => `https://db.videasy.net/3/tv/popular?language=en&page=${page}`;
+            baseUrlTemplate = (page) => `${TMDB_BASE}/3/tv/popular?language=en&page=${page}`;
         } else {
-            baseUrlTemplate = (page) => `https://db.videasy.net/3/search/multi?language=en&page=${page}&query=${encodedKeyword}`;
+            baseUrlTemplate = (page) => `${TMDB_BASE}/3/search/multi?language=en&page=${page}&query=${encodedKeyword}`;
         }
 
         let dataResults = [];
@@ -93,7 +104,7 @@ async function extractDetails(url) {
             if (!match) throw new Error("Invalid URL format");
 
             const movieId = match[1];
-            const responseText = await soraFetch(`https://db.videasy.net/3/movie/${movieId}?append_to_response=external_ids&language=en`);
+            const responseText = await soraFetch(`${TMDB_BASE}/3/movie/${movieId}?append_to_response=external_ids&language=en`);
             const data = await responseText.json();
 
             const transformedResults = [{
@@ -108,7 +119,7 @@ async function extractDetails(url) {
             if (!match) throw new Error("Invalid URL format");
 
             const showId = match[1];
-            const responseText = await soraFetch(`https://db.videasy.net/3/tv/${showId}?append_to_response=external_ids&language=en`);
+            const responseText = await soraFetch(`${TMDB_BASE}/3/tv/${showId}?append_to_response=external_ids&language=en`);
             const data = await responseText.json();
 
             const transformedResults = [{
@@ -154,7 +165,7 @@ async function extractEpisodes(url) {
 
             const showId = match[1];
 
-            const showResponseText = await soraFetch(`https://db.videasy.net/3/tv/${showId}?language=en`);
+            const showResponseText = await soraFetch(`${TMDB_BASE}/3/tv/${showId}?language=en`);
             const showData = await showResponseText.json();
 
             let allEpisodes = [];
@@ -163,7 +174,7 @@ async function extractEpisodes(url) {
 
                 if (seasonNumber === 0) continue;
 
-                const seasonResponseText = await soraFetch(`https://db.videasy.net/3/tv/${showId}/season/${seasonNumber}?language=en`);
+                const seasonResponseText = await soraFetch(`${TMDB_BASE}/3/tv/${showId}/season/${seasonNumber}?language=en`);
                 const seasonData = await seasonResponseText.json();
 
                 if (seasonData.episodes && seasonData.episodes.length) {
@@ -187,12 +198,12 @@ async function extractEpisodes(url) {
     }
 }
 
-function buildStreamsAndSubtitles(sources, subtitles) {
+function buildStreamsAndSubtitles(sources, subtitles, serverName, serverNote, serverFlag) {
     const nonHDRSources = sources.filter(s => !s.quality.includes("HDR"));
 
-    // Build stream objects with descriptive titles: "Cineby - 1080p"
+    // Build stream objects with server name, flag, quality
     const streamObjects = nonHDRSources.map(src => ({
-        title: `${SOURCE_NAME} - ${src.quality}`,
+        title: `${SOURCE_NAME} ${serverFlag} ${serverName} - ${src.quality}`,
         streamUrl: src.url,
         headers: {
             "Origin": "https://www.cineby.sc",
@@ -201,7 +212,6 @@ function buildStreamsAndSubtitles(sources, subtitles) {
     }));
 
     // Build subtitle objects with numbered providers per language
-    // e.g. "English (1)", "English (2)", "Arabic (1)", etc.
     const langCount = {};
     const subtitleObjects = subtitles.map(sub => {
         const lang = sub.language || sub.lang || "Unknown";
@@ -210,8 +220,6 @@ function buildStreamsAndSubtitles(sources, subtitles) {
 
         langCount[lang] = (langCount[lang] || 0) + 1;
         const count = langCount[lang];
-
-        // If multiple subs for same language, number them
         const label = count > 1 ? `${lang} (${count})` : lang;
 
         const proxiedUrl = `${PROXY_URL}/?url=${encodeURIComponent(url)}&type=vtt&referer=${REFERER}`;
@@ -221,7 +229,7 @@ function buildStreamsAndSubtitles(sources, subtitles) {
         };
     }).filter(Boolean);
 
-    console.log('Streams found: ' + streamObjects.length + ', Subtitles found: ' + subtitleObjects.length);
+    console.log(`Server ${serverName}: ${streamObjects.length} streams, ${subtitleObjects.length} subs`);
 
     return {
         streams: streamObjects,
@@ -229,23 +237,15 @@ function buildStreamsAndSubtitles(sources, subtitles) {
     };
 }
 
-async function extractStreamUrl(ID) {
-    if (ID.includes('movie')) {
-        const tmdbID = ID.replace('/movie/', '');
-        const cinebyResponse = await soraFetch(`https://db.videasy.net/3/movie/${tmdbID}?append_to_response=external_ids&language=en`);
-        const cinebyData = await cinebyResponse.json();
-
-        const title = encodeURIComponent(cinebyData.title);
-        const year = new Date(cinebyData.release_date).getFullYear();
-        const imdbId = cinebyData.external_ids?.imdb_id || '';
-        const tmdbId = cinebyData.id;
-
-        const fullUrl = `https://api.videasy.net/cdn/sources-with-title?title=${title}&mediaType=movie&year=${year}&episodeId=1&seasonId=1&tmdbId=${tmdbId}&imdbId=${imdbId}`;
-
-        console.log('Full URL:' + fullUrl);
-
-        const responseTwo = await soraFetch(fullUrl);
-        const encrypted = await responseTwo.text();
+async function fetchServerSources(server, params) {
+    try {
+        const url = `${API_BASE}${server.path}?title=${params.title}&mediaType=${params.mediaType}&year=${params.year}&episodeId=${params.episodeId}&seasonId=${params.seasonId}&tmdbId=${params.tmdbId}&imdbId=${params.imdbId}&totalSeasons=${params.totalSeasons || 1}${server.extraParams || ''}`;
+        
+        const responseText = await soraFetch(url);
+        if (!responseText) return null;
+        
+        const encrypted = await responseText.text();
+        if (!encrypted || encrypted.startsWith('{')) return null;
 
         const headers = {
             "Content-Type": "application/json",
@@ -255,60 +255,100 @@ async function extractStreamUrl(ID) {
 
         const postData = JSON.stringify({
             text: encrypted,
-            id: String(tmdbID).split('-')[0]
+            id: String(params.tmdbId).split('-')[0]
         });
-        console.log('Post Data:' + postData);
-        const decryptedResponse = await fetchv2("https://enc-dec.app/api/dec-videasy", headers, "POST", postData);
-        const decryptedData = await decryptedResponse.json();
-        console.log('Decrypted Data:' + JSON.stringify(decryptedData));
 
-        const result = decryptedData.result || {};
+        const decryptedResponse = await fetchv2("https://enc-dec.app/api/dec-videasy", headers, "POST", postData);
+        if (!decryptedResponse) return null;
+        
+        const decryptedData = await decryptedResponse.json();
+        if (!decryptedData || !decryptedData.result) return null;
+
+        const result = decryptedData.result;
         const sources = result.sources || [];
         const subtitles = result.subtitles || [];
 
-        return JSON.stringify(buildStreamsAndSubtitles(sources, subtitles));
+        if (sources.length === 0) return null;
+
+        return buildStreamsAndSubtitles(sources, subtitles, server.name, server.note, server.flag);
+    } catch (e) {
+        console.log(`Server ${server.name} failed: ${e}`);
+        return null;
+    }
+}
+
+async function extractStreamUrl(ID) {
+    let params;
+    
+    if (ID.includes('movie')) {
+        const tmdbID = ID.replace('/movie/', '');
+        const response = await soraFetch(`${TMDB_BASE}/3/movie/${tmdbID}?append_to_response=external_ids&language=en`);
+        const data = await response.json();
+
+        params = {
+            title: encodeURIComponent(data.title),
+            mediaType: "movie",
+            year: new Date(data.release_date).getFullYear(),
+            episodeId: 1,
+            seasonId: 1,
+            tmdbId: data.id,
+            imdbId: data.external_ids?.imdb_id || '',
+            totalSeasons: 1
+        };
     } else if (ID.includes('tv')) {
         const parts = ID.split('/');
         const tmdbID = parts[2];
         const seasonNumber = parts[3];
         const episodeNumber = parts[4];
 
-        const cinebyResponse = await soraFetch(`https://db.videasy.net/3/tv/${tmdbID}?append_to_response=external_ids&language=en`);
-        const cinebyData = await cinebyResponse.json();
+        const response = await soraFetch(`${TMDB_BASE}/3/tv/${tmdbID}?append_to_response=external_ids&language=en`);
+        const data = await response.json();
 
-        const title = encodeURIComponent(cinebyData.name);
-        const year = new Date(cinebyData.first_air_date).getFullYear();
-        const imdbId = cinebyData.external_ids?.imdb_id || '';
-        const tmdbId = cinebyData.id;
-
-        const fullUrl = `https://api.videasy.net/cdn/sources-with-title?title=${title}&mediaType=tv&year=${year}&episodeId=${episodeNumber}&seasonId=${seasonNumber}&tmdbId=${tmdbId}&imdbId=${imdbId}`;
-
-        console.log('Full URL:' + fullUrl);
-
-        const responseTwo = await soraFetch(fullUrl);
-        const encrypted = await responseTwo.text();
-
-        const headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+        params = {
+            title: encodeURIComponent(data.name),
+            mediaType: "tv",
+            year: new Date(data.first_air_date).getFullYear(),
+            episodeId: episodeNumber,
+            seasonId: seasonNumber,
+            tmdbId: data.id,
+            imdbId: data.external_ids?.imdb_id || '',
+            totalSeasons: data.number_of_seasons || 1
         };
-
-        const postData = JSON.stringify({
-            text: encrypted,
-            id: String(tmdbID).split('-')[0]
-        });
-
-        const decryptedResponse = await fetchv2("https://enc-dec.app/api/dec-videasy", headers, "POST", postData);
-        const decryptedData = await decryptedResponse.json();
-        console.log('Decrypted Data:' + JSON.stringify(decryptedData));
-
-        const result = decryptedData.result || {};
-        const sources = result.sources || [];
-        const subtitles = result.subtitles || [];
-
-        return JSON.stringify(buildStreamsAndSubtitles(sources, subtitles));
+    } else {
+        return JSON.stringify({ streams: [], subtitles: [] });
     }
+
+    console.log('Stream params: ' + JSON.stringify(params));
+
+    // Fetch from all servers in parallel
+    const serverPromises = SERVERS.map(server => fetchServerSources(server, params));
+    const serverResults = await Promise.all(serverPromises);
+
+    // Merge all results into one combined output
+    let allStreams = [];
+    let allSubtitles = [];
+
+    for (const result of serverResults) {
+        if (!result) continue;
+        allStreams = allStreams.concat(result.streams);
+        allSubtitles = allSubtitles.concat(result.subtitles);
+    }
+
+    // Deduplicate subtitles by lang+url
+    const seenSubs = new Set();
+    allSubtitles = allSubtitles.filter(sub => {
+        const key = sub.lang + '|' + sub.url;
+        if (seenSubs.has(key)) return false;
+        seenSubs.add(key);
+        return true;
+    });
+
+    console.log(`Total: ${allStreams.length} streams from ${serverResults.filter(Boolean).length} servers, ${allSubtitles.length} subtitles`);
+
+    return JSON.stringify({
+        streams: allStreams,
+        subtitles: allSubtitles
+    });
 }
 
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
