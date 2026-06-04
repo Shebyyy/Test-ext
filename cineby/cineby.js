@@ -3,7 +3,7 @@
 // Thanks ibro for the TMDB search!
 
 const API_BASE = "https://api.videasy.net";
-const TMDB_BASE = "https://db.videasy.net/3";
+const TMDB_BASE = "https://db.videasy.net";
 const PROXY_URL = "https://passthrough-worker.simplepostrequest.workers.dev";
 const REFERER = "https%3A%2F%2Fwww.cineby.sc%2F";
 const SOURCE_NAME = "Cineby";
