@@ -1,0 +1,28 @@
+{
+  "sourceName": "HiDrama",
+  "iconUrl": "https://asianctv.cc/template/images/icon_192x192.png",
+  "author": {
+    "name": "50/50",
+    "icon": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ3122kQwublLkZ6rf1fEpUP79BxZOFmH9BSA&s"
+  },
+  "version": "1.0.0",
+  "language": "English",
+  "streamType": "HLS",
+  "quality": "1080p",
+  "baseUrl": "https://hidrama.to/",
+  "searchBaseUrl": "https://hidrama.to/search?keyword=%s&type=movies",
+  "scriptUrl": "https://raw.githubusercontent.com/Shebyyy/Test-ext/main/asianctv/asianctv-hidrama.js",
+  "type": "anime/movies/shows",
+  "asyncJS": true,
+  "softsub": true,
+  "downloadSupport": false,
+  "note": "Mirror of asianctv.cc",
+  "supportsSora": true,
+  "supportsLuna": true,
+  "supportsMojuru": true,
+  "supportsDartotsu": true,
+  "supportsAnymex": true,
+  "supportsTsumi": true,
+  "supportsHiyoku": true,
+  "supportsShirox": true
+}
