@@ -35,7 +35,12 @@ function decodeBase64(str) {
 
 // ─── Helper: Strip HTML tags ─────────────────────────────────────────
 function stripHtml(html) {
-  return html.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, ' ').trim();
+  return html.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, ' ').replace(/&#(\d+);/g, function(m, code) { return String.fromCharCode(parseInt(code, 10)); }).trim();
+}
+
+// ─── Helper: Decode HTML entities in URLs ─────────────────────────────
+function decodeHtmlEntities(str) {
+  return str.replace(/&#(\d+);/g, function(m, code) { return String.fromCharCode(parseInt(code, 10)); }).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
 }
 
 // ─── SEARCH ──────────────────────────────────────────────────────────
@@ -266,7 +271,7 @@ async function extractStreamUrl(url) {
         // Extract the iframe src URL
         const srcMatch = decoded.match(/src="([^"]+)"/i);
         if (srcMatch) {
-          const streamUrl = srcMatch[1];
+          const streamUrl = decodeHtmlEntities(srcMatch[1]);
 
           // Determine if it's SUB or DUB based on label
           const isSub = label.toLowerCase().includes('sub');
@@ -295,7 +300,7 @@ async function extractStreamUrl(url) {
       if (iframeMatch) {
         streams.push({
           title: 'Animo',
-          streamUrl: iframeMatch[1],
+          streamUrl: decodeHtmlEntities(iframeMatch[1]),
           headers: {
             'Referer': BASE_URL + '/',
             'Origin': BASE_URL
