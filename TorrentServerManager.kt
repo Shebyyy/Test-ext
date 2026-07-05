@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.data.torrentServer.model.FileStat
 import eu.kanade.tachiyomi.data.torrentServer.model.Torrent
 import org.libtorrent4j.*
 import org.libtorrent4j.alerts.Alert
+import org.libtorrent4j.alerts.ReadPieceAlert
 import java.io.File
 
 class TorrentServerManager(private val context: Context) {
@@ -21,7 +22,9 @@ class TorrentServerManager(private val context: Context) {
         sessionManager.addListener(object : AlertListener {
             override fun types(): IntArray? = null
             override fun alert(alert: Alert<*>) {
-                // handle alert
+                if (alert is ReadPieceAlert) {
+                    httpServer?.onReadPieceAlert(alert)
+                }
             }
         })
     }
@@ -107,14 +110,16 @@ class TorrentServerManager(private val context: Context) {
             val tempFile = downloadTorrentFile(url)
             if (tempFile != null) {
                 val ti = TorrentInfo(tempFile)
-                sessionManager.download(ti, cacheDir)
+                val p = Priority.array(Priority.IGNORE, ti.numFiles())
+                sessionManager.download(ti, cacheDir, p, TorrentFlags.SEQUENTIAL_DOWNLOAD)
                 handle = sessionManager.find(ti.infoHash())
             }
         } else {
             val file = File(url)
             if (file.exists()) {
                 val ti = TorrentInfo(file)
-                sessionManager.download(ti, cacheDir)
+                val p = Priority.array(Priority.IGNORE, ti.numFiles())
+                sessionManager.download(ti, cacheDir, p, TorrentFlags.SEQUENTIAL_DOWNLOAD)
                 handle = sessionManager.find(ti.infoHash())
             }
         }
