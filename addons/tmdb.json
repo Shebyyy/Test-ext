@@ -1,0 +1,84 @@
+    {
+      "id": "tmdb",
+      "name": "TMDB",
+      "version": "1.0.0",
+      "description": "Track TV shows & movies on The Movie Database",
+      "color": "#01D277",
+      "icon": "https://www.themoviedb.org/favicon.ico",
+      "capabilities": ["anime"],
+      "auth": {
+        "type": "token",
+        "username_placeholder": "Read Access Token (Bearer)"
+      },
+      "api": {
+        "base_url": "https://api.themoviedb.org/3",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      },
+      "endpoints": {
+        "search": {
+          "url": "/search/tv?query={query}&page=1",
+          "response_path": "results",
+          "mapping": {
+            "id": "id",
+            "title": "name",
+            "poster": "poster_path",
+            "description": "overview",
+            "total_episodes": "number_of_episodes",
+            "score": "vote_average",
+            "status": "status"
+          }
+        },
+        "user_profile": {
+          "url": "https://api.themoviedb.org/4/account",
+          "response_path": "",
+          "id_path": "id",
+          "mapping": {
+            "name": "name",
+            "avatar": "avatar.gravatar.hash"
+          }
+        },
+        "user_list": {
+          "url": "https://api.themoviedb.org/4/account/{user_id}/watchlist/tv?page=1&sort_by=created_at.desc",
+          "response_path": "results",
+          "mapping": {
+            "remote_id": "id",
+            "title": "name",
+            "poster": "poster_path",
+            "total_episodes": "number_of_episodes",
+            "score": "vote_average"
+          }
+        },
+        "add_entry": {
+          "url": "https://api.themoviedb.org/4/account/{user_id}/watchlist",
+          "method": "POST",
+          "body_template": {
+            "media_type": "tv",
+            "media_id": "{media_id}",
+            "watchlist": "true"
+          }
+        },
+        "update_entry": {
+          "url": "https://api.themoviedb.org/4/account/{user_id}/watchlist",
+          "method": "POST",
+          "body_template": {
+            "media_type": "tv",
+            "media_id": "{media_id}",
+            "watchlist": "true"
+          }
+        },
+        "delete_entry": {
+          "url": "https://api.themoviedb.org/4/account/{user_id}/watchlist",
+          "method": "POST",
+          "body_template": {
+            "media_type": "tv",
+            "media_id": "{list_id}",
+            "watchlist": "false"
+          }
+        }
+      },
+      "status_map": {
+        "watchlist": "PLANNING"
+      }
+    }
